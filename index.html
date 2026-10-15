@@ -175,18 +175,31 @@ const SHAPES = [
   px((x, y) => (E(x, y, .5, .42, .36, .4) || (RC(x, y, .14, .42, .86, .95) && !(E(x, y, .22, .98, .09, .09) || E(x, y, .5, .98, .09, .09) || E(x, y, .78, .98, .09, .09)))) && // ghost
     !(E(x, y, .36, .42, .07, .1) || E(x, y, .64, .42, .07, .1) || E(x, y, .5, .66, .06, .08))),
   px((x, y) => (E(x, y, .5, .45, .48, .42) && y < .6 || RC(x, y, .34, .55, .66, 1)) &&                                      // mushroom
-    !(E(x, y, .3, .3, .09, .1) || E(x, y, .7, .35, .08, .1) || E(x, y, .5, .14, .07, .08)))
+    !(E(x, y, .3, .3, .09, .1) || E(x, y, .7, .35, .08, .1) || E(x, y, .5, .14, .07, .08))),
+  px((x, y) => (E(x, y, .42, .58, .34, .28) || E(x, y, .72, .3, .17, .18) || T(x, y, .87, .27, .99, .33, .87, .4) ||             // bird
+    T(x, y, .12, .5, .0, .28, .22, .62) || RC(x, y, .36, .8, .41, .98) || RC(x, y, .5, .8, .55, .98)) &&
+    !(E(x, y, .75, .26, .035, .045) || (E(x, y, .4, .58, .17, .12) && !E(x, y, .4, .52, .17, .1)))),
+  px((x, y) => (E(x, y, .5, .66, .42, .28) || E(x, y, .25, .3, .14, .16) || E(x, y, .75, .3, .14, .16) || E(x, y, .12, .92, .1, .07) || E(x, y, .88, .92, .1, .07)) && // frog
+    !(E(x, y, .25, .3, .05, .07) || E(x, y, .75, .3, .05, .07) || (E(x, y, .5, .7, .3, .13) && !E(x, y, .5, .62, .3, .13)))),
+  px((x, y) => (E(x, y, .5, .55, .3, .42) || E(x, y, .17, .58, .08, .2) || E(x, y, .83, .58, .08, .2) || E(x, y, .36, .97, .11, .05) || E(x, y, .64, .97, .11, .05)) && // penguin
+    !(E(x, y, .5, .72, .13, .19) || E(x, y, .4, .3, .035, .045) || E(x, y, .6, .3, .035, .045) || T(x, y, .44, .36, .56, .36, .5, .43) ||
+      RC(x, y, .24, .45, .255, .8) || RC(x, y, .745, .45, .76, .8))),
+  px((x, y) => (E(x, y, .45, .5, .3, .25) || E(x, y, .75, .4, .18, .2) || E(x, y, .91, .62, .06, .26) || RC(x, y, .24, .6, .36, .98) || RC(x, y, .52, .6, .64, .98) || E(x, y, .14, .55, .04, .1)) && // elephant
+    !(E(x, y, .68, .42, .06, .13) || E(x, y, .82, .33, .025, .035) || RC(x, y, .24, .85, .36, .9) && false)),
+  px((x, y) => (E(x, y, .4, .55, .28, .24) || E(x, y, .72, .26, .2, .15) || RC(x, y, .62, .26, .76, .5) || T(x, y, .16, .45, .0, .78, .25, .66) || // dinosaur
+    RC(x, y, .3, .7, .42, .98) || RC(x, y, .5, .68, .6, .98) || E(x, y, .6, .58, .06, .06)) &&
+    !(E(x, y, .78, .2, .03, .04) || RC(x, y, .86, .31, .96, .33)))
 ];
 
 // ---------- state ----------
 const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
-  order: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
+  order: [], assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
   shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1
 };
 window.__G = G; // handy for debugging
-G.build = n => buildLevel(n);
+G.build = n => buildLevel(n); G.update = dt => update(dt); G.launch = () => launch();
 try { G.best = +localStorage.getItem('sb-best') || 0; } catch (e) {}
 
 // ---------- field rendering ----------
@@ -232,18 +245,18 @@ function buildLevel(n) {
     else t = shape((c - 2) / 50, (r - 2) / 52) ? 1 : 0;
     g[r * COLS + c] = t;
   }
-  // channels: each is a 4-wide gap with 2-thick walls; slanted ones shift 1 col per 2 rows above row `base`
-  const T = G.tubes[n % G.tubes.length];
+  // channels: each is a gap (default 4 wide) with 2-thick walls; diagonal ones shift 1 col per `step` rows above row `base`
+  let T = G.tubes[n % G.tubes.length];
   const defs = T === 'twin' ? [{ L0: 14, top: 42, dir: 0 }, { L0: 36, top: 42, dir: 0 }]
-    : T === 'slantL' ? [{ L0: 25, top: 36, dir: -1, base: 48 }]
-    : T === 'slantR' ? [{ L0: 25, top: 36, dir: 1, base: 48 }]
+    : T === 'slantL' ? [{ L0: 26, top: 38, dir: -1, base: 55, step: 3, w: 6 }]   // steeper diagonal
+    : T === 'slantR' ? [{ L0: 22, top: 38, dir: 1, base: 55, step: 3, w: 6 }]
     : T === 'diagL' ? [{ L0: 29, top: 34, dir: -1, base: 55, step: 5, w: 8 }]   // diagonal all the way
     : T === 'diagR' ? [{ L0: 21, top: 34, dir: 1, base: 55, step: 5, w: 8 }]
     : T === 'triple' ? [{ L0: 8, top: 42, dir: 0 }, { L0: 25, top: 42, dir: 0 }, { L0: 42, top: 42, dir: 0 }]
     : T === 'vee' ? [{ L0: 8, top: 34, dir: 1, base: 55, step: 5, w: 8 }, { L0: 38, top: 34, dir: -1, base: 55, step: 5, w: 8 }]
     : T === 'flare' ? [{ L0: 16, top: 34, dir: -1, base: 55, step: 5, w: 8 }, { L0: 30, top: 34, dir: 1, base: 55, step: 5, w: 8 }]
     : [{ L0: 25, top: TUBE_TOP, dir: 0 }];
-  G.aim = []; G.cavs = [];
+  G.aim = []; G.cavs = []; G.assist = [];
   for (const d of defs) {
     for (let r = d.top; r < ROWS; r++) {
       const w = d.w || 4, gl = d.L0 + d.dir * Math.floor(Math.max(0, (d.base || 48) - r) / (d.step || 2));
@@ -252,6 +265,7 @@ function buildLevel(n) {
     }
     const w2 = (d.w || 4) / 2, topC = d.L0 + d.dir * Math.floor(Math.max(0, (d.base || 48) - d.top) / (d.step || 2)) + w2;
     G.aim.push(OX + (d.L0 + w2) * C);
+    if (d.w) G.assist.push({ x: OX + (d.L0 + w2) * C, ax: d.dir / d.step });
     G.cavs.push([topC, d.top - 3]);
   }
   // cavity above each channel
@@ -444,7 +458,21 @@ function collideGrid(b) {
     }
   }
 }
+// gentle funnel: balls rising toward a diagonal channel get sucked onto its axis
+function funnel(b, dt) {
+  if (b.vy >= 0 || b.y < FIELD_BOTTOM) return;
+  let a = null;
+  for (const q of G.assist) if (!a || Math.abs(b.x - q.x) < Math.abs(b.x - a.x)) a = q;
+  if (!a || b.y - FIELD_BOTTOM > 150 || Math.abs(b.x - a.x) > 100) return;
+  const ty = b.y - 40, tx = a.x + a.ax * (FIELD_BOTTOM - ty);
+  const cur = Math.atan2(b.vx, -b.vy), want = Math.atan2(tx - b.x, b.y - ty);
+  let d = want - cur;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  const th = cur + Math.max(-4 * dt, Math.min(4 * dt, d));
+  b.vx = Math.sin(th) * G.speed; b.vy = -Math.cos(th) * G.speed;
+}
 function stepBall(b, dt) {
+  if (G.assist.length) funnel(b, dt);
   const dist = G.speed * dt, n = Math.max(1, Math.ceil(dist / 1.2)), st = dt / n;
   for (let i = 0; i < n; i++) {
     b.x += b.vx * st; b.y += b.vy * st;
