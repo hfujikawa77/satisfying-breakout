@@ -182,10 +182,11 @@ const SHAPES = [
 const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
-  order: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], assist: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
+  order: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
   shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1
 };
 window.__G = G; // handy for debugging
+G.build = n => buildLevel(n);
 try { G.best = +localStorage.getItem('sb-best') || 0; } catch (e) {}
 
 // ---------- field rendering ----------
@@ -236,13 +237,13 @@ function buildLevel(n) {
   const defs = T === 'twin' ? [{ L0: 14, top: 42, dir: 0 }, { L0: 36, top: 42, dir: 0 }]
     : T === 'slantL' ? [{ L0: 25, top: 36, dir: -1, base: 48 }]
     : T === 'slantR' ? [{ L0: 25, top: 36, dir: 1, base: 48 }]
-    : T === 'diagL' ? [{ L0: 29, top: 34, dir: -1, base: 55, step: 3, w: 6 }]   // diagonal all the way
-    : T === 'diagR' ? [{ L0: 21, top: 34, dir: 1, base: 55, step: 3, w: 6 }]
+    : T === 'diagL' ? [{ L0: 29, top: 34, dir: -1, base: 55, step: 5, w: 8 }]   // diagonal all the way
+    : T === 'diagR' ? [{ L0: 21, top: 34, dir: 1, base: 55, step: 5, w: 8 }]
     : T === 'triple' ? [{ L0: 8, top: 42, dir: 0 }, { L0: 25, top: 42, dir: 0 }, { L0: 42, top: 42, dir: 0 }]
-    : T === 'vee' ? [{ L0: 10, top: 34, dir: 1, base: 55, step: 3, w: 6 }, { L0: 38, top: 34, dir: -1, base: 55, step: 3, w: 6 }]
-    : T === 'flare' ? [{ L0: 18, top: 34, dir: -1, base: 55, step: 3, w: 6 }, { L0: 30, top: 34, dir: 1, base: 55, step: 3, w: 6 }]
+    : T === 'vee' ? [{ L0: 8, top: 34, dir: 1, base: 55, step: 5, w: 8 }, { L0: 38, top: 34, dir: -1, base: 55, step: 5, w: 8 }]
+    : T === 'flare' ? [{ L0: 16, top: 34, dir: -1, base: 55, step: 5, w: 8 }, { L0: 30, top: 34, dir: 1, base: 55, step: 5, w: 8 }]
     : [{ L0: 25, top: TUBE_TOP, dir: 0 }];
-  G.aim = []; G.cavs = []; G.assist = [];
+  G.aim = []; G.cavs = [];
   for (const d of defs) {
     for (let r = d.top; r < ROWS; r++) {
       const w = d.w || 4, gl = d.L0 + d.dir * Math.floor(Math.max(0, (d.base || 48) - r) / (d.step || 2));
@@ -251,7 +252,6 @@ function buildLevel(n) {
     }
     const w2 = (d.w || 4) / 2, topC = d.L0 + d.dir * Math.floor(Math.max(0, (d.base || 48) - d.top) / (d.step || 2)) + w2;
     G.aim.push(OX + (d.L0 + w2) * C);
-    if (d.w) G.assist.push({ x: OX + (d.L0 + w2) * C, ax: d.dir / d.step });   // fully diagonal channels get a gentle funnel
     G.cavs.push([topC, d.top - 3]);
   }
   // cavity above each channel
@@ -444,25 +444,7 @@ function collideGrid(b) {
     }
   }
 }
-// gentle funnel: balls rising toward a diagonal channel are steered onto its axis
-function funnel(b, dt) {
-  if (b.vy >= 0 || b.y < FIELD_BOTTOM) return;
-  let a = null;
-  for (const q of G.assist) if (!a || Math.abs(b.x - q.x) < Math.abs(b.x - a.x)) a = q;
-  if (a) {
-    const depth = b.y - FIELD_BOTTOM;
-    if (depth > 150 || Math.abs(b.x - a.x) > 100) return;
-    const ty = b.y - 40, tx = a.x + a.ax * (FIELD_BOTTOM - ty);
-    const cur = Math.atan2(b.vx, -b.vy), want = Math.atan2(tx - b.x, b.y - ty);
-    let d = want - cur;
-    d = Math.atan2(Math.sin(d), Math.cos(d));
-    const th = cur + Math.max(-4 * dt, Math.min(4 * dt, d));
-    b.vx = Math.sin(th) * G.speed; b.vy = -Math.cos(th) * G.speed;
-    return;
-  }
-}
 function stepBall(b, dt) {
-  if (G.assist.length) funnel(b, dt);
   const dist = G.speed * dt, n = Math.max(1, Math.ceil(dist / 1.2)), st = dt / n;
   for (let i = 0; i < n; i++) {
     b.x += b.vx * st; b.y += b.vy * st;
