@@ -81,7 +81,7 @@ function brickSound() {
 function paddleSound() { tone(170, 0.12, 'sine', 0.5, 0.5); tone(900, 0.03, 'square', 0.08); }
 function orbSound(up) {
   const base = up ? 523 : 262;
-  [0, 4, 7, 12].forEach((s, i) => setTimeout(() => tone(base * Math.pow(2, (up ? s : -s) / 12), 0.18, 'square', 0.08), i * 55));
+  [0, 4, 7, 12].forEach((s, i) => setTimeout(() => tone(base * Math.pow(2, (up ? s : -s) / 12), 0.18, 'triangle', 0.045), i * 55));
 }
 let lastWall = 0, lastDrop = 0;
 function wallSound() {
@@ -91,7 +91,7 @@ function wallSound() {
   tone(500 + Math.random() * 100, 0.06, 'square', 0.12);
 }
 function popSound(n) {
-  for (let i = 0; i < Math.min(n, 6); i++) setTimeout(() => tone(280 + i * 90 + Math.random() * 30, 0.09, 'sine', 0.2, 1.7), i * 45);
+  for (let i = 0; i < Math.min(n, 6); i++) setTimeout(() => tone(280 + i * 90 + Math.random() * 30, 0.09, 'sine', 0.09, 1.7), i * 45);
 }
 function dropSound() {
   const now = performance.now();
@@ -347,7 +347,7 @@ function popOrb(o) {
       }
       orbSound(true); break;
     }
-    case 'pierce': G.pierce = 8; orbSound(true); tone(660, 0.3, 'sawtooth', 0.1, 2); break;
+    case 'pierce': G.pierce = 8; orbSound(true); tone(660, 0.3, 'triangle', 0.05, 2); break;
     case 'minus': G.pwKind = -1; G.pwTimer = 12; orbSound(false); break;
     case 'wide': G.pwKind = 1; G.pwTimer = 12; orbSound(true); break;
     case 'bomb': {
@@ -359,7 +359,7 @@ function popOrb(o) {
         if (Math.hypot(OX + (c + 0.5) * C - o.x, OY + (r + 0.5) * C - o.y) < rad) destroyCell(c, r);
       }
       G.shake = 4; burst(o.x, o.y, '#ffd060', 40, 160);
-      tone(90, 0.4, 'sawtooth', 0.25, 0.3);
+      tone(90, 0.4, 'sawtooth', 0.1, 0.3);
       for (const q of G.orbs.slice()) if (Math.hypot(q.x - o.x, q.y - o.y) < rad) popOrb(q);
       break;
     }
