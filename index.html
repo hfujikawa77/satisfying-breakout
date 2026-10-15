@@ -205,17 +205,20 @@ function buildLevel(n) {
     : T === 'slantR' ? [{ L0: 25, top: 36, dir: 1, base: 48 }]
     : T === 'diagL' ? [{ L0: 29, top: 34, dir: -1, base: 55, step: 3, w: 6 }]   // diagonal all the way
     : T === 'diagR' ? [{ L0: 21, top: 34, dir: 1, base: 55, step: 3, w: 6 }]
+    : T === 'triple' ? [{ L0: 8, top: 42, dir: 0 }, { L0: 25, top: 42, dir: 0 }, { L0: 42, top: 42, dir: 0 }]
+    : T === 'vee' ? [{ L0: 10, top: 34, dir: 1, base: 55, step: 3, w: 6 }, { L0: 38, top: 34, dir: -1, base: 55, step: 3, w: 6 }]
+    : T === 'flare' ? [{ L0: 18, top: 34, dir: -1, base: 55, step: 3, w: 6 }, { L0: 30, top: 34, dir: 1, base: 55, step: 3, w: 6 }]
     : [{ L0: 25, top: TUBE_TOP, dir: 0 }];
   G.aim = []; G.cavs = []; G.assist = [];
   for (const d of defs) {
     for (let r = d.top; r < ROWS; r++) {
-      const w = d.w || 4, gl = d.L0 + d.dir * Math.floor(Math.max(0, d.base - r) / (d.step || 2));
+      const w = d.w || 4, gl = d.L0 + d.dir * Math.floor(Math.max(0, (d.base || 48) - r) / (d.step || 2));
       for (const c of [gl - 2, gl - 1, gl + w, gl + w + 1]) g[r * COLS + c] = 2;
       for (let c = gl; c < gl + w; c++) g[r * COLS + c] = 0;
     }
-    const w2 = (d.w || 4) / 2, topC = d.L0 + d.dir * Math.floor(Math.max(0, d.base - d.top) / (d.step || 2)) + w2;
+    const w2 = (d.w || 4) / 2, topC = d.L0 + d.dir * Math.floor(Math.max(0, (d.base || 48) - d.top) / (d.step || 2)) + w2;
     G.aim.push(OX + (d.L0 + w2) * C);
-    if (d.w) G.assist.push({ x: OX + (d.L0 + w2) * C, ax: d.dir / (d.step || 2) });   // diagonal channels get a gentle funnel
+    if (d.w) G.assist.push({ x: OX + (d.L0 + w2) * C, ax: d.dir / d.step });   // fully diagonal channels get a gentle funnel
     G.cavs.push([topC, d.top - 3]);
   }
   // cavity above each channel
@@ -273,14 +276,13 @@ function newGame() {
   G.level = 0; G.score = 0; G.lives = 3; G.pwTimer = 0; G.pierce = 0; G.pw = 56;
   G.parts.length = 0; G.texts.length = 0;
   G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
-  const kinds = ['center', 'twin', 'slantL', 'slantR', 'diagL', 'diagR'];
-  G.tubes = SHAPES.map((_, i) => kinds[(i + Math.floor(Math.random() * 6)) % 6]);
-  G.tubes.sort(() => Math.random() - 0.5);
-  // show the channel types right away: diagonal, twin, then slanted
-  G.tubes[0] = Math.random() < 0.5 ? 'diagL' : 'diagR';
-  G.tubes[1] = 'twin';
-  G.tubes[2] = Math.random() < 0.5 ? 'slantL' : 'slantR';
-  // debug/preview: ?tube=twin|slantL|slantR|center  ?lv=N
+  const kinds = ['center', 'twin', 'triple', 'slantL', 'slantR', 'diagL', 'diagR', 'vee', 'flare'];
+  G.tubes = [];
+  for (let i = 0; i < SHAPES.length; i++) {
+    let k; do { k = kinds[(Math.random() * kinds.length) | 0]; } while (k === G.tubes[i - 1]);
+    G.tubes.push(k);
+  }
+  // debug/preview: ?tube=<kind>  ?lv=N
   const q = new URLSearchParams(location.search), tq = q.get('tube'), lq = parseInt(q.get('lv'), 10);
   if (kinds.includes(tq)) G.tubes = G.tubes.map(() => tq);
   if (lq > 1) G.level = lq - 1;
@@ -412,9 +414,11 @@ function collideGrid(b) {
 // gentle funnel: balls rising toward a diagonal channel are steered onto its axis
 function funnel(b, dt) {
   if (b.vy >= 0 || b.y < FIELD_BOTTOM) return;
-  for (const a of G.assist) {
+  let a = null;
+  for (const q of G.assist) if (!a || Math.abs(b.x - q.x) < Math.abs(b.x - a.x)) a = q;
+  if (a) {
     const depth = b.y - FIELD_BOTTOM;
-    if (depth > 150 || Math.abs(b.x - a.x) > 100) continue;
+    if (depth > 150 || Math.abs(b.x - a.x) > 100) return;
     const ty = b.y - 40, tx = a.x + a.ax * (FIELD_BOTTOM - ty);
     const cur = Math.atan2(b.vx, -b.vy), want = Math.atan2(tx - b.x, b.y - ty);
     let d = want - cur;
