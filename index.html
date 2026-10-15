@@ -271,9 +271,18 @@ function newGame() {
   G.parts.length = 0; G.texts.length = 0;
   G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
   const kinds = ['center', 'twin', 'slantL', 'slantR'];
-  G.tubes = SHAPES.map((_, i) => i === 0 ? 'center' : kinds[(Math.random() * kinds.length) | 0]);
-  buildLevel(0); resetBall();
-  addText(W / 2, OY + 100, 'LEVEL 1', '#fff', 22, 1.4);
+  G.tubes = SHAPES.map((_, i) => kinds[(i + Math.floor(Math.random() * 4)) % 4]);
+  G.tubes.sort(() => Math.random() - 0.5);
+  for (let i = 0; i < 2; i++) if (G.tubes[i] === 'center') {   // show the new channel types right away
+    const j = G.tubes.findIndex((t, k) => k >= 2 && t !== 'center');
+    if (j > 0) [G.tubes[i], G.tubes[j]] = [G.tubes[j], G.tubes[i]];
+  }
+  // debug/preview: ?tube=twin|slantL|slantR|center  ?lv=N
+  const q = new URLSearchParams(location.search), tq = q.get('tube'), lq = parseInt(q.get('lv'), 10);
+  if (kinds.includes(tq)) G.tubes = G.tubes.map(() => tq);
+  if (lq > 1) G.level = lq - 1;
+  buildLevel(G.level); resetBall();
+  addText(W / 2, OY + 100, 'LEVEL ' + (G.level + 1), '#fff', 22, 1.4);
 }
 function launch() {
   if (G.state !== 'ready') return;
