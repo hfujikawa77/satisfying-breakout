@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Satisfying Breakout</title>
+<style>
+html,body{margin:0;height:100%;background:#0d0d0d;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+body{display:flex;align-items:center;justify-content:center}
+#wrap{position:relative;border-radius:18px;overflow:hidden;background:#161616;box-shadow:0 0 0 6px #2c2c2c,0 10px 40px #000}
+canvas{display:block;touch-action:none}
+#mute{position:absolute;right:10px;bottom:10px;width:34px;height:34px;border-radius:50%;border:0;background:#262626;color:#fff;font-size:16px;line-height:34px;padding:0;cursor:pointer;opacity:.85}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="mute" title="Sound (M)">🔊</button>
+</div>
+<script>
+(() => {
+'use strict';
+// ---------- constants ----------
+const W = 270, H = 500;           // logical size
+const C = 5, COLS = 54, ROWS = 56; // 5px cells
+const OX = 0, OY = 22;             // field origin
+const FIELD_BOTTOM = OY + ROWS * C;
+const PADDLE_Y = 452, PH = 6, DEAD_Y = 488;
+const R = 2.3;                     // ball radius
+const TUBE_TOP = 42, GAP0 = 25, GAP1 = 28; // channel columns (inclusive)
+const MAXB = 400;
+const ORB_R = 7.5;
+const ORANGE = '#ff6b4a';
+const FONT = '"Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif';
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const wrap = document.getElementById('wrap');
+const muteBtn = document.getElementById('mute');
+const field = document.createElement('canvas');
+const fctx = field.getContext('2d');
+let scale = 1;
+
+// ---------- audio ----------
+let ac = null, master = null, muted = false;
+try { muted = localStorage.getItem('sb-muted') === '1'; } catch (e) {}
+muteBtn.textContent = muted ? '🔇' : '🔊';
+function initAudio() {
+  if (!ac) {
+    try {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      master = ac.createGain(); master.gain.value = 0.3; master.connect(ac.destination);
+    } catch (e) { ac = null; }
+  }
+  if (ac && ac.state === 'suspended') ac.resume();
+}
+function tone(f, d, type, v, slide) {
+  if (!ac || muted) return;
+  const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type || 'sine';
+  o.frequency.setValueAtTime(f, t);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, f * slide), t + d);
+  g.gain.setValueAtTime(v || 0.2, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + d);
+  o.connect(g); g.connect(master);
+  o.start(t); o.stop(t + d + 0.02);
+}
+const PENTA = [0, 2, 4, 7, 9];
+let combo = 0, lastBreak = 0, lastBlip = 0;
+function brickSound() {
+  const now = performance.now();
+  if (now - lastBreak > 400) combo = 0;
+  lastBreak = now; combo++;
+  if (now - lastBlip < 28) return;
+  lastBlip = now;
+  const i = combo % 15;
+  const semi = PENTA[i % 5] + 12 * Math.floor(i / 5);
+  tone(392 * Math.pow(2, semi / 12), 0.12, 'triangle', 0.16);
+}
+function paddleSound() { tone(180, 0.1, 'sine', 0.3, 0.5); }
+function orbSound(up) {
+  const base = up ? 523 : 262;
+  [0, 4, 7, 12].forEach((s, i) => setTimeout(() => tone(base * Math.pow(2, (up ? s : -s) / 12), 0.18, 'square', 0.08), i * 55));
+}
+function loseSound() { tone(220, 0.35, 'sawtooth', 0.12, 0.3); }
+function clearSound() { [0, 4, 7, 12, 16].forEach((s, i) => setTimeout(() => tone(440 * Math.pow(2, s / 12), 0.25, 'triangle', 0.18), i * 90)); }
+
+// ---------- level shapes ----------
+const heart = (u, v) => {
+  const x = (u - 0.5) * 2.4, y = (0.48 - v) * 2.7;
+  const a = x * x + y * y - 1;
+  return a * a * a - x * x * y * y * y < 0;
+};
+const ell = (u, v, cx, cy, rx, ry) => ((u - cx) / rx) ** 2 + ((v - cy) / ry) ** 2 < 1;
+const SHAPES = [
+  () => true,
+  (u, v) => (u - 0.5) ** 2 + (v - 0.45) ** 2 < 0.2,
+  heart,
+  // tree-shaped hole carved out of a full field
+  (u, v) => !(ell(u, v, 0.5, 0.38, 0.4, 0.3) || ell(u, v, 0.3, 0.5, 0.17, 0.14) ||
+    ell(u, v, 0.7, 0.5, 0.17, 0.14) || ell(u, v, 0.5, 0.2, 0.17, 0.12) ||
+    (u > 0.46 && u < 0.54 && v > 0.55 && v < 0.9)),
+  (u, v) => ((Math.round(u * 50) + Math.round(v * 52)) % 14 + 14) % 14 < 9,
+  (u, v) => Math.sin(u * 10) + Math.sin(v * 9 + u * 4) + Math.sin((u + v) * 7) > -0.9
+];
+
+// ---------- state ----------
+const G = {
+  state: 'ready', level: 0, score: 0, lives: 3, best: 0,
+  bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
+  balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
+  shake: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1
+};
+window.__G = G; // handy for debugging
+try { G.best = +localStorage.getItem('sb-best') || 0; } catch (e) {}
+
+// ---------- field rendering ----------
+function drawCell(c, r, t) {
+  const fy = r * C, fx = c * C;
+  if (t === 1) {
+    fctx.fillStyle = '#2b7a13'; fctx.fillRect(fx, fy, C, C);
+    fctx.fillStyle = '#48b81d'; fctx.fillRect(fx, fy, C - 1, C - 1);
+  } else if (t === 2) {
+    fctx.fillStyle = '#4a4a4a'; fctx.fillRect(fx, fy, C, C);
+    fctx.fillStyle = '#8c8c8c'; fctx.fillRect(fx, fy, C - 1, C - 1);
+  } else {
+    fctx.clearRect(fx, fy, C, C);
+  }
+}
+function renderField() {
+  fctx.setTransform(scale, 0, 0, scale, 0, 0);
+  fctx.clearRect(0, 0, W, ROWS * C);
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const t = G.grid[r * COLS + c];
+    if (t) drawCell(c, r, t);
+  }
+}
+function resize() {
+  const maxW = window.innerWidth - 12, maxH = window.innerHeight - 12;
+  const cssW = Math.floor(Math.min(maxW, maxH * W / H));
+  const dpr = window.devicePixelRatio || 1;
+  scale = cssW / W * dpr;
+  cv.width = Math.round(W * scale); cv.height = Math.round(H * scale);
+  cv.style.width = cssW + 'px'; cv.style.height = Math.round(cssW * H / W) + 'px';
+  field.width = cv.width; field.height = Math.round(ROWS * C * scale);
+  renderField();
+}
+window.addEventListener('resize', resize);
+
+// ---------- level setup ----------
+function buildLevel(n) {
+  const g = G.grid;
+  const shape = SHAPES[n % SHAPES.length];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    let t;
+    if (c < 2 || c >= COLS - 2 || r < 2 || r >= ROWS - 2) t = 2;
+    else t = shape((c - 2) / 50, (r - 2) / 52) ? 1 : 0;
+    g[r * COLS + c] = t;
+  }
+  for (let r = TUBE_TOP; r < ROWS; r++) {
+    for (const c of [23, 24, 29, 30]) g[r * COLS + c] = 2;
+    for (let c = GAP0; c <= GAP1; c++) g[r * COLS + c] = 0;
+  }
+  // cavity above the channel
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (g[r * COLS + c] === 1 && (c + 0.5 - 27) ** 2 + (r + 0.5 - 39) ** 2 < 25) g[r * COLS + c] = 0;
+  }
+  let b = 0; for (let i = 0; i < g.length; i++) if (g[i] === 1) b++;
+  G.bricks = b;
+  // orbs
+  G.orbs = [];
+  const want = 6 + Math.min(n, 4), cand = [];
+  for (let r = 6; r < 38; r++) for (let c = 6; c < COLS - 6; c++) if (g[r * COLS + c] === 1) cand.push([c, r]);
+  for (let tries = 0; tries < 400 && G.orbs.length < want && cand.length; tries++) {
+    const [c, r] = cand[(Math.random() * cand.length) | 0];
+    const x = OX + (c + 0.5) * C, y = OY + (r + 0.5) * C;
+    if (G.orbs.every(o => Math.hypot(o.x - x, o.y - y) > 30)) {
+      const k = Math.random();
+      const type = k < 0.34 ? 'plus3' : k < 0.46 ? 'x2' : k < 0.6 ? 'minus' : k < 0.8 ? 'wide' : 'bomb';
+      G.orbs.push({ x, y, type, ph: Math.random() * 6.28 });
+    }
+  }
+  G.speed = Math.min(380, 250 * (1 + 0.04 * n));
+  renderField();
+}
+const ORB = {
+  plus3: { col: '#19d3e0', txt: '+3' },
+  x2: { col: '#9be22c', txt: '×2' },
+  minus: { col: ORANGE, txt: '−' },
+  wide: { col: '#ff6fa8', txt: '▲' },
+  bomb: { col: '#ffb020', txt: '★' }
+};
+
+function resetBall() {
+  G.balls = [{ x: G.px, y: PADDLE_Y - PH / 2 - R - 1, vx: 0, vy: 0 }];
+  G.state = 'ready';
+}
+function newGame() {
+  G.level = 0; G.score = 0; G.lives = 3; G.pwTimer = 0; G.pw = 56;
+  G.parts.length = 0; G.texts.length = 0;
+  buildLevel(0); resetBall();
+  addText(W / 2, OY + 100, 'LEVEL 1', '#fff', 22, 1.4);
+}
+function launch() {
+  if (G.state !== 'ready') return;
+  const b = G.balls[0], a = (Math.random() - 0.5) * 0.08;
+  b.vx = Math.sin(a) * G.speed; b.vy = -Math.cos(a) * G.speed;
+  G.state = 'play'; G.hint = 0;
+}
+
+// ---------- effects ----------
+function addText(x, y, text, color, size, life) {
+  G.texts.push({ x, y, text, color, size, life, t: 0 });
+}
+function burst(x, y, color, n, spd) {
+  for (let i = 0; i < n && G.parts.length < 2500; i++) {
+    const a = Math.random() * 6.283, s = (0.3 + Math.random()) * spd;
+    G.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 20, life: 0.4 + Math.random() * 0.5, t: 0, col: color, sz: 1 + Math.random() * 2 });
+  }
+}
+function destroyCell(c, r) {
+  const i = r * COLS + c;
+  if (G.grid[i] !== 1) return;
+  G.grid[i] = 0;
+  fctx.setTransform(scale, 0, 0, scale, 0, 0);
+  fctx.clearRect(c * C, r * C, C, C);
+  G.bricks--; G.score++;
+  const x = OX + (c + 0.5) * C, y = OY + (r + 0.5) * C;
+  for (let k = 0; k < 2 && G.parts.length < 2500; k++) {
+    G.parts.push({ x, y, vx: (Math.random() - 0.5) * 70, vy: -Math.random() * 60, life: 0.5 + Math.random() * 0.5, t: 0, col: Math.random() < 0.5 ? '#48b81d' : '#7be83a', sz: 2 + Math.random() * 1.5, g: 260 });
+  }
+  brickSound();
+  if (G.shake < 1.2) G.shake += 0.1;
+}
+
+// ---------- orbs ----------
+function spawnBalls(x, y, n) {
+  for (let i = 0; i < n && G.balls.length < MAXB; i++) {
+    const a = Math.random() * 6.283;
+    G.balls.push({ x, y, vx: Math.cos(a) * G.speed, vy: Math.sin(a) * G.speed });
+  }
+}
+function popOrb(o) {
+  const i = G.orbs.indexOf(o); if (i < 0) return;
+  G.orbs.splice(i, 1);
+  const d = ORB[o.type];
+  G.score += 50;
+  burst(o.x, o.y, d.col, 24, 110);
+  addText(o.x, o.y - 8, d.txt, d.col, 14, 0.9);
+  switch (o.type) {
+    case 'plus3': spawnBalls(o.x, o.y, 3); orbSound(true); break;
+    case 'x2': {
+      const cur = G.balls.slice();
+      for (const b of cur) {
+        if (G.balls.length >= MAXB) break;
+        const a = Math.atan2(b.vy, b.vx) + (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 0.5);
+        G.balls.push({ x: b.x, y: b.y, vx: Math.cos(a) * G.speed, vy: Math.sin(a) * G.speed });
+      }
+      orbSound(true); break;
+    }
+    case 'minus': G.pwKind = -1; G.pwTimer = 12; orbSound(false); break;
+    case 'wide': G.pwKind = 1; G.pwTimer = 12; orbSound(true); break;
+    case 'bomb': {
+      const rad = 30;
+      const c0 = Math.floor((o.x - rad - OX) / C), c1 = Math.floor((o.x + rad - OX) / C);
+      const r0 = Math.floor((o.y - rad - OY) / C), r1 = Math.floor((o.y + rad - OY) / C);
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+        if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
+        if (Math.hypot(OX + (c + 0.5) * C - o.x, OY + (r + 0.5) * C - o.y) < rad) destroyCell(c, r);
+      }
+      G.shake = 4; burst(o.x, o.y, '#ffd060', 40, 160);
+      tone(90, 0.4, 'sawtooth', 0.25, 0.3);
+      for (const q of G.orbs.slice()) if (Math.hypot(q.x - o.x, q.y - o.y) < rad) popOrb(q);
+      break;
+    }
+  }
+}
+
+// ---------- ball physics ----------
+function collideGrid(b) {
+  for (let it = 0; it < 3; it++) {
+    const g = G.grid;
+    const c0 = Math.floor((b.x - R - OX) / C), c1 = Math.floor((b.x + R - OX) / C);
+    const r0 = Math.floor((b.y - R - OY) / C), r1 = Math.floor((b.y + R - OY) / C);
+    let best = -1, bd = 1e9, bnx = 0, bny = 0, bdist = 0, bc = 0, br = 0;
+    for (let r = r0; r <= r1; r++) {
+      if (r < 0 || r >= ROWS) continue;
+      for (let c = c0; c <= c1; c++) {
+        if (c < 0 || c >= COLS) continue;
+        const t = g[r * COLS + c]; if (!t) continue;
+        const rx = OX + c * C, ry = OY + r * C;
+        const px = Math.max(rx, Math.min(b.x, rx + C)), py = Math.max(ry, Math.min(b.y, ry + C));
+        const dx = b.x - px, dy = b.y - py, d2 = dx * dx + dy * dy;
+        if (d2 < R * R && d2 < bd) {
+          bd = d2; best = t; bc = c; br = r;
+          if (d2 > 1e-6) { bdist = Math.sqrt(d2); bnx = dx / bdist; bny = dy / bdist; }
+          else { bdist = 0; const m = Math.hypot(b.vx, b.vy) || 1; bnx = -b.vx / m; bny = -b.vy / m; }
+        }
+      }
+    }
+    if (best < 0) return;
+    const dot = b.vx * bnx + b.vy * bny;
+    if (dot < 0) { b.vx -= 2 * dot * bnx; b.vy -= 2 * dot * bny; }
+    b.x += bnx * (R - bdist + 0.01); b.y += bny * (R - bdist + 0.01);
+    if (best === 1) destroyCell(bc, br);
+    // keep speed constant and avoid endless flat trajectories
+    let m = Math.hypot(b.vx, b.vy) || 1;
+    b.vx = b.vx / m * G.speed; b.vy = b.vy / m * G.speed;
+    const minV = G.speed * 0.18;
+    if (Math.abs(b.vy) < minV) {
+      b.vy = (b.vy < 0 ? -1 : 1) * minV;
+      const s = Math.sqrt(G.speed * G.speed - b.vy * b.vy);
+      b.vx = (b.vx < 0 ? -1 : 1) * s;
+    }
+  }
+}
+function stepBall(b, dt) {
+  const dist = G.speed * dt, n = Math.max(1, Math.ceil(dist / 1.2)), st = dt / n;
+  for (let i = 0; i < n; i++) {
+    b.x += b.vx * st; b.y += b.vy * st;
+    if (b.y < FIELD_BOTTOM + R + 1) collideGrid(b);
+    if (b.x < R) { b.x = R; b.vx = Math.abs(b.vx); }
+    else if (b.x > W - R) { b.x = W - R; b.vx = -Math.abs(b.vx); }
+    // paddle
+    const half = G.pw / 2, top = PADDLE_Y - PH / 2;
+    if (b.vy > 0 && b.y + R >= top && b.y - R <= PADDLE_Y + PH / 2 && Math.abs(b.x - G.px) <= half + R) {
+      const t = Math.max(-1, Math.min(1, (b.x - G.px) / half)), a = t * 1.0;
+      b.vx = Math.sin(a) * G.speed; b.vy = -Math.cos(a) * G.speed;
+      b.y = top - R; G.bump = 1; paddleSound();
+    }
+    if (b.y - R > DEAD_Y) { b.dead = true; return; }
+  }
+}
+
+// ---------- update ----------
+function update(dt) {
+  // paddle
+  if (G.keys.l) G.target -= 420 * dt;
+  if (G.keys.r) G.target += 420 * dt;
+  G.target = Math.max(G.pw / 2 + 2, Math.min(W - G.pw / 2 - 2, G.target));
+  G.px += (G.target - G.px) * (1 - Math.exp(-dt * 40));
+  if (G.pwTimer > 0) {
+    G.pwTimer -= dt;
+    if (G.pwTimer <= 0) { G.pwKind = 0; G.pwTimer = 0; }
+  }
+  const wantW = G.pwKind > 0 ? 88 : G.pwKind < 0 ? 34 : 56;
+  G.pw += (wantW - G.pw) * (1 - Math.exp(-dt * 12));
+  G.bump = Math.max(0, G.bump - dt * 8);
+  G.shake = Math.max(0, G.shake - dt * 8);
+
+  if (G.state === 'ready') {
+    const b = G.balls[0]; b.x = G.px; b.y = PADDLE_Y - PH / 2 - R - 1;
+  } else if (G.state === 'play' || G.state === 'clear') {
+    for (const b of G.balls) stepBall(b, dt);
+    // orbs
+    for (const o of G.orbs.slice()) {
+      for (const b of G.balls) {
+        if (Math.hypot(b.x - o.x, b.y - o.y) < ORB_R + R) { popOrb(o); break; }
+      }
+    }
+    const before = G.balls.length;
+    G.balls = G.balls.filter(b => !b.dead);
+    if (G.state === 'play') {
+      if (G.bricks <= 0) {
+        G.state = 'clear'; G.timer = 1.8; clearSound();
+        addText(W / 2, OY + 110, 'CLEAR!', '#fff', 26, 1.8);
+        G.shake = 2;
+      } else if (G.balls.length === 0 && before > 0) {
+        loseSound();
+        G.lives--;
+        if (G.lives <= 0) {
+          G.state = 'over';
+          if (G.score > G.best) { G.best = G.score; try { localStorage.setItem('sb-best', G.best); } catch (e) {} }
+        } else {
+          G.pwKind = 0; G.pwTimer = 0;
+          resetBall();
+          addText(W / 2, OY + 110, 'MISS', ORANGE, 20, 1.0);
+        }
+      }
+    } else {
+      G.timer -= dt;
+      if (G.timer <= 0) {
+        G.level++; G.pwKind = 0; G.pwTimer = 0;
+        buildLevel(G.level); resetBall();
+        addText(W / 2, OY + 100, 'LEVEL ' + (G.level + 1), '#fff', 22, 1.4);
+      }
+    }
+  }
+  // particles & texts
+  for (let i = G.parts.length - 1; i >= 0; i--) {
+    const p = G.parts[i]; p.t += dt;
+    if (p.t >= p.life) { G.parts[i] = G.parts[G.parts.length - 1]; G.parts.pop(); continue; }
+    p.vy += (p.g || 120) * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+  }
+  for (let i = G.texts.length - 1; i >= 0; i--) {
+    const t = G.texts[i]; t.t += dt; t.y -= 12 * dt;
+    if (t.t >= t.life) G.texts.splice(i, 1);
+  }
+}
+
+// ---------- drawing ----------
+function rrect(x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+}
+function draw(now) {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.fillStyle = '#161616'; ctx.fillRect(0, 0, W, H);
+  // header
+  ctx.fillStyle = '#343434'; ctx.fillRect(0, 0, W, OY - 4);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 11px ' + FONT; ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left'; ctx.fillText('SCORE ' + G.score, 10, 9);
+  ctx.textAlign = 'center'; ctx.fillText('LV ' + (G.level + 1), W / 2, 9);
+  ctx.textAlign = 'right'; ctx.fillText('♥'.repeat(Math.max(0, G.lives)), W - 10, 9);
+
+  const sx = (Math.random() - 0.5) * G.shake, sy = (Math.random() - 0.5) * G.shake;
+  ctx.save(); ctx.translate(sx, sy);
+  ctx.drawImage(field, 0, 0, field.width, field.height, OX, OY, W, ROWS * C);
+
+  // orbs
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const o of G.orbs) {
+    const d = ORB[o.type], p = 1 + Math.sin(now / 250 + o.ph) * 0.06;
+    ctx.fillStyle = d.col; ctx.beginPath(); ctx.arc(o.x, o.y, ORB_R * p, 0, 6.283); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 9px ' + FONT; ctx.fillText(d.txt, o.x, o.y + 0.5);
+  }
+  // particles
+  for (const p of G.parts) {
+    ctx.globalAlpha = 1 - p.t / p.life; ctx.fillStyle = p.col; ctx.fillRect(p.x, p.y, p.sz, p.sz);
+  }
+  ctx.globalAlpha = 1;
+  // bottom line
+  ctx.fillStyle = ORANGE; ctx.fillRect(0, DEAD_Y + 2, W, 6);
+  // paddle
+  const pw = G.pw, ph = PH + G.bump * 2;
+  ctx.fillStyle = G.pwKind > 0 ? '#ff8fbf' : G.pwKind < 0 ? '#c9452b' : ORANGE;
+  rrect(G.px - pw / 2, PADDLE_Y - ph / 2, pw, ph, 3); ctx.fill();
+  // balls
+  ctx.fillStyle = '#fff'; ctx.beginPath();
+  for (const b of G.balls) { ctx.moveTo(b.x + R, b.y); ctx.arc(b.x, b.y, R, 0, 6.283); }
+  ctx.fill();
+  // texts
+  for (const t of G.texts) {
+    ctx.globalAlpha = Math.min(1, (t.life - t.t) * 2.5);
+    ctx.fillStyle = t.color; ctx.font = 'bold ' + t.size + 'px ' + FONT; ctx.textAlign = 'center';
+    ctx.fillText(t.text, t.x, t.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // overlays
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (G.state === 'ready' && G.hint) {
+    ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '12px ' + FONT;
+    ctx.fillText('ドラッグでパドル移動 / タップで発射', W / 2, 395);
+    ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.font = '10px ' + FONT;
+    ctx.fillText('ボールは中央の通路から上へ', W / 2, 412);
+  }
+  if (G.state === 'over') {
+    ctx.fillStyle = 'rgba(0,0,0,.72)'; ctx.fillRect(0, 130, W, 150);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 26px ' + FONT; ctx.fillText('GAME OVER', W / 2, 168);
+    ctx.font = '13px ' + FONT; ctx.fillText('SCORE ' + G.score + '   BEST ' + G.best, W / 2, 205);
+    ctx.fillStyle = ORANGE; ctx.fillText('タップでリスタート', W / 2, 245);
+  }
+}
+
+// ---------- loop ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(1 / 30, (now - last) / 1000); last = now;
+  update(dt); draw(now);
+  requestAnimationFrame(frame);
+}
+
+// ---------- input ----------
+function pointerX(e) {
+  const r = cv.getBoundingClientRect();
+  return (e.clientX - r.left) / r.width * W;
+}
+cv.addEventListener('pointermove', e => { G.target = pointerX(e); });
+cv.addEventListener('pointerdown', e => {
+  initAudio();
+  G.target = pointerX(e);
+  if (G.state === 'ready') launch();
+  else if (G.state === 'over') newGame();
+});
+window.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'a') G.keys.l = true;
+  else if (e.key === 'ArrowRight' || e.key === 'd') G.keys.r = true;
+  else if (e.key === ' ' || e.key === 'Enter') {
+    initAudio(); e.preventDefault();
+    if (G.state === 'ready') launch(); else if (G.state === 'over') newGame();
+  } else if (e.key === 'm') toggleMute();
+});
+window.addEventListener('keyup', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'a') G.keys.l = false;
+  else if (e.key === 'ArrowRight' || e.key === 'd') G.keys.r = false;
+});
+function toggleMute() {
+  muted = !muted; muteBtn.textContent = muted ? '🔇' : '🔊';
+  try { localStorage.setItem('sb-muted', muted ? '1' : '0'); } catch (e) {}
+}
+muteBtn.addEventListener('pointerdown', e => { e.stopPropagation(); initAudio(); toggleMute(); });
+
+resize();
+newGame();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
