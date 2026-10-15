@@ -82,6 +82,22 @@ function orbSound(up) {
   const base = up ? 523 : 262;
   [0, 4, 7, 12].forEach((s, i) => setTimeout(() => tone(base * Math.pow(2, (up ? s : -s) / 12), 0.18, 'square', 0.08), i * 55));
 }
+let lastWall = 0, lastDrop = 0;
+function wallSound() {
+  const now = performance.now();
+  if (now - lastWall < 45) return;
+  lastWall = now;
+  tone(520 + Math.random() * 120, 0.05, 'square', 0.045);
+}
+function popSound(n) {
+  for (let i = 0; i < Math.min(n, 6); i++) setTimeout(() => tone(280 + i * 90 + Math.random() * 30, 0.09, 'sine', 0.2, 1.7), i * 45);
+}
+function dropSound() {
+  const now = performance.now();
+  if (now - lastDrop < 80) return;
+  lastDrop = now;
+  tone(300, 0.22, 'sine', 0.16, 0.35);
+}
 function loseSound() { tone(220, 0.35, 'sawtooth', 0.12, 0.3); }
 function clearSound() { [0, 4, 7, 12, 16].forEach((s, i) => setTimeout(() => tone(440 * Math.pow(2, s / 12), 0.25, 'triangle', 0.18), i * 90)); }
 
@@ -277,6 +293,7 @@ function destroyCell(c, r) {
 
 // ---------- orbs ----------
 function spawnBalls(x, y, n) {
+  popSound(n);
   for (let i = 0; i < n && G.balls.length < MAXB; i++) {
     const a = Math.random() * 6.283;
     G.balls.push({ x, y, vx: Math.cos(a) * G.speed, vy: Math.sin(a) * G.speed });
@@ -294,6 +311,7 @@ function popOrb(o) {
     case 'plus5': spawnBalls(o.x, o.y, 5); orbSound(true); break;
     case 'x2': case 'x3': {
       const k = o.type === 'x3' ? 2 : 1, cur = G.balls.slice();
+      popSound(k + 2);
       for (const b of cur) {
         for (let j = 0; j < k && G.balls.length < MAXB; j++) {
           const a = Math.atan2(b.vy, b.vx) + (j % 2 ? 1 : -1) * (0.4 + Math.random() * 0.5);
@@ -344,6 +362,7 @@ function collideGrid(b) {
       }
     }
     if (best < 0) return;
+    if (best === 2) wallSound();
     if (best === 1 && G.pierce > 0) { destroyCell(bc, br); continue; }
     const dot = b.vx * bnx + b.vy * bny;
     if (dot < 0) { b.vx -= 2 * dot * bnx; b.vy -= 2 * dot * bny; }
@@ -365,8 +384,8 @@ function stepBall(b, dt) {
   for (let i = 0; i < n; i++) {
     b.x += b.vx * st; b.y += b.vy * st;
     if (b.y < FIELD_BOTTOM + R + 1) collideGrid(b);
-    if (b.x < R) { b.x = R; b.vx = Math.abs(b.vx); }
-    else if (b.x > W - R) { b.x = W - R; b.vx = -Math.abs(b.vx); }
+    if (b.x < R) { b.x = R; b.vx = Math.abs(b.vx); wallSound(); }
+    else if (b.x > W - R) { b.x = W - R; b.vx = -Math.abs(b.vx); wallSound(); }
     // paddle
     const half = G.pw / 2, top = PADDLE_Y - PH / 2;
     if (b.vy > 0 && b.y + R >= top && b.y - R <= PADDLE_Y + PH / 2 && Math.abs(b.x - G.px) <= half + R) {
@@ -407,6 +426,7 @@ function update(dt) {
     }
     const before = G.balls.length;
     G.balls = G.balls.filter(b => !b.dead);
+    if (G.balls.length < before) dropSound();
     if (G.state === 'play') {
       if (G.bricks <= 0) {
         G.state = 'clear'; G.timer = 1.8; clearSound();
