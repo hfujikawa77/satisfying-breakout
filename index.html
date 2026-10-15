@@ -252,8 +252,6 @@ function buildLevel(n) {
   // channels: each is a gap (default 4 wide) with 2-thick walls; diagonal ones shift 1 col per `step` rows above row `base`
   let T = G.tubes[n % G.tubes.length];
   const defs = T === 'twin' ? [{ L0: 14, top: 42, dir: 0 }, { L0: 36, top: 42, dir: 0 }]
-    : T === 'slantL' ? [{ L0: 26, top: 38, dir: -1, base: 55, step: 3, w: 6 }]   // steeper diagonal
-    : T === 'slantR' ? [{ L0: 22, top: 38, dir: 1, base: 55, step: 3, w: 6 }]
     : T === 'diagL' ? [{ L0: 29, top: 34, dir: -1, base: 55, step: 5, w: 8 }]   // diagonal all the way
     : T === 'diagR' ? [{ L0: 21, top: 34, dir: 1, base: 55, step: 5, w: 8 }]
     : T === 'triple' ? [{ L0: 8, top: 42, dir: 0 }, { L0: 25, top: 42, dir: 0 }, { L0: 42, top: 42, dir: 0 }]
@@ -327,7 +325,7 @@ function newGame() {
   G.level = 0; G.score = 0; G.lives = 3; G.pwTimer = 0; G.pierce = 0; G.pw = 56;
   G.parts.length = 0; G.texts.length = 0;
   G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
-  const kinds = ['center', 'twin', 'triple', 'slantL', 'slantR', 'diagL', 'diagR', 'vee', 'flare'];
+  const kinds = ['center', 'twin', 'triple', 'diagL', 'diagR', 'vee', 'flare'];
   G.tubes = [];
   for (let i = 0; i < SHAPES.length; i++) {
     let k; do { k = kinds[(Math.random() * kinds.length) | 0]; } while (k === G.tubes[i - 1]);
