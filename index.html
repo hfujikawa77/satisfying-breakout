@@ -27,7 +27,7 @@ const OX = 0, OY = 22;             // field origin
 const FIELD_BOTTOM = OY + ROWS * C;
 const PADDLE_Y = 452, PH = 6, DEAD_Y = 488;
 const R = 2.3;                     // ball radius
-const TUBE_TOP = 42, GAP0 = 25, GAP1 = 28; // channel columns (inclusive)
+const TUBE_TOP = 42;               // default channel top row
 const MAXB = 400;
 const ORB_R = 7.5;
 const ORANGE = '#ff6b4a';
@@ -148,7 +148,7 @@ const SHAPES = [
 const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
-  order: [], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
+  order: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
   shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1
 };
 window.__G = G; // handy for debugging
@@ -197,13 +197,26 @@ function buildLevel(n) {
     else t = shape((c - 2) / 50, (r - 2) / 52) ? 1 : 0;
     g[r * COLS + c] = t;
   }
-  for (let r = TUBE_TOP; r < ROWS; r++) {
-    for (const c of [23, 24, 29, 30]) g[r * COLS + c] = 2;
-    for (let c = GAP0; c <= GAP1; c++) g[r * COLS + c] = 0;
+  // channels: each is a 4-wide gap with 2-thick walls; slanted ones shift 1 col per 2 rows above row 48
+  const T = G.tubes[n % G.tubes.length];
+  const defs = T === 'twin' ? [{ L0: 14, top: 42, dir: 0 }, { L0: 36, top: 42, dir: 0 }]
+    : T === 'slantL' ? [{ L0: 25, top: 36, dir: -1 }]
+    : T === 'slantR' ? [{ L0: 25, top: 36, dir: 1 }]
+    : [{ L0: 25, top: TUBE_TOP, dir: 0 }];
+  G.aim = []; G.cavs = [];
+  for (const d of defs) {
+    for (let r = d.top; r < ROWS; r++) {
+      const gl = d.L0 + d.dir * Math.floor(Math.max(0, 48 - r) / 2);
+      for (const c of [gl - 2, gl - 1, gl + 4, gl + 5]) g[r * COLS + c] = 2;
+      for (let c = gl; c < gl + 4; c++) g[r * COLS + c] = 0;
+    }
+    const topC = d.L0 + d.dir * Math.floor(Math.max(0, 48 - d.top) / 2) + 2;
+    G.aim.push(OX + (d.L0 + 2) * C);
+    G.cavs.push([topC, d.top - 3]);
   }
-  // cavity above the channel
+  // cavity above each channel
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-    if (g[r * COLS + c] === 1 && (c + 0.5 - 27) ** 2 + (r + 0.5 - 39) ** 2 < 25) g[r * COLS + c] = 0;
+    if (g[r * COLS + c] === 1 && G.cavs.some(([cx, cy]) => (c + 0.5 - cx) ** 2 + (r + 0.5 - cy) ** 2 < 25)) g[r * COLS + c] = 0;
   }
   let b = 0; for (let i = 0; i < g.length; i++) if (g[i] === 1) b++;
   G.bricks = b;
@@ -213,7 +226,7 @@ function buildLevel(n) {
   // ball-increasing orbs go near the channel (front), the rest higher up
   const near = [], mid = [], far = [];
   for (let r = 6; r < 41; r++) for (let c = 6; c < COLS - 6; c++) if (g[r * COLS + c] === 1) {
-    const dc = Math.abs(c - 27);
+    const dc = Math.min(...G.cavs.map(v => Math.abs(c - v[0])));
     (r >= 31 && dc < 15 ? near : r >= 22 && dc < 22 ? mid : far).push([c, r]);
   }
   const place = (lists, type) => {
@@ -256,12 +269,16 @@ function newGame() {
   G.level = 0; G.score = 0; G.lives = 3; G.pwTimer = 0; G.pierce = 0; G.pw = 56;
   G.parts.length = 0; G.texts.length = 0;
   G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
+  const kinds = ['center', 'twin', 'slantL', 'slantR'];
+  G.tubes = SHAPES.map((_, i) => i === 0 ? 'center' : kinds[(Math.random() * kinds.length) | 0]);
   buildLevel(0); resetBall();
   addText(W / 2, OY + 100, 'LEVEL 1', '#fff', 22, 1.4);
 }
 function launch() {
   if (G.state !== 'ready') return;
-  const b = G.balls[0], a = (Math.random() - 0.5) * 0.08;
+  // aim the first shot at the nearest channel entrance
+  const b = G.balls[0], tx = G.aim.reduce((m, x) => Math.abs(x - b.x) < Math.abs(m - b.x) ? x : m, G.aim[0]);
+  const a = Math.atan2(tx - b.x, b.y - FIELD_BOTTOM) + (Math.random() - 0.5) * 0.04;
   b.vx = Math.sin(a) * G.speed; b.vy = -Math.cos(a) * G.speed;
   G.state = 'play'; G.hint = 0;
 }
@@ -523,7 +540,7 @@ function draw(now) {
     ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '12px ' + FONT;
     ctx.fillText('ドラッグでパドル移動 / タップで発射', W / 2, 395);
     ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.font = '10px ' + FONT;
-    ctx.fillText('ボールは中央の通路から上へ', W / 2, 412);
+    ctx.fillText('ボールは通路から上へ', W / 2, 412);
   }
   if (G.state === 'over') {
     ctx.fillStyle = 'rgba(0,0,0,.72)'; ctx.fillRect(0, 130, W, 150);
