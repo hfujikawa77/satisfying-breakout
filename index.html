@@ -9,12 +9,15 @@ html,body{margin:0;height:100%;background:#0d0d0d;overflow:hidden;touch-action:n
 body{display:flex;align-items:center;justify-content:center}
 #wrap{position:relative;border-radius:18px;overflow:hidden;background:#161616;box-shadow:0 0 0 6px #2c2c2c,0 10px 40px #000}
 canvas{display:block;touch-action:none}
+#suck{position:absolute;left:10px;bottom:10px;height:34px;border-radius:17px;border:0;background:#262626;color:#fff;font:12px/34px system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;padding:0 12px;cursor:pointer;opacity:.85}
+#suck.off{color:#888}
 #mute{position:absolute;right:10px;bottom:10px;width:34px;height:34px;border-radius:50%;border:0;background:#262626;color:#fff;font-size:16px;line-height:34px;padding:0;cursor:pointer;opacity:.85}
 </style>
 </head>
 <body>
 <div id="wrap">
   <canvas id="c"></canvas>
+  <button id="suck" title="吸引 (F)">🧲 吸引 ON</button>
   <button id="mute" title="Sound (M)">🔊</button>
 </div>
 <script>
@@ -37,6 +40,7 @@ const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
 const wrap = document.getElementById('wrap');
 const muteBtn = document.getElementById('mute');
+const suckBtn = document.getElementById('suck');
 const field = document.createElement('canvas');
 const fctx = field.getContext('2d');
 let scale = 1;
@@ -196,7 +200,7 @@ const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
   order: [], assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
-  shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1
+  shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1, suction: true
 };
 window.__G = G; // handy for debugging
 G.build = n => buildLevel(n); G.update = dt => update(dt); G.launch = () => launch();
@@ -265,7 +269,7 @@ function buildLevel(n) {
     }
     const w2 = (d.w || 4) / 2, topC = d.L0 + d.dir * Math.floor(Math.max(0, (d.base || 48) - d.top) / (d.step || 2)) + w2;
     G.aim.push(OX + (d.L0 + w2) * C);
-    if (d.w) G.assist.push({ x: OX + (d.L0 + w2) * C, ax: d.dir / d.step });
+    G.assist.push({ x: OX + (d.L0 + w2) * C, ax: d.w ? d.dir / d.step : 0 });
     G.cavs.push([topC, d.top - 3]);
   }
   // cavity above each channel
@@ -458,7 +462,7 @@ function collideGrid(b) {
     }
   }
 }
-// gentle funnel: balls rising toward a diagonal channel get sucked onto its axis
+// gentle funnel: balls rising toward a channel get sucked onto its axis (toggle with the 🧲 button / F)
 function funnel(b, dt) {
   if (b.vy >= 0 || b.y < FIELD_BOTTOM) return;
   let a = null;
@@ -472,7 +476,7 @@ function funnel(b, dt) {
   b.vx = Math.sin(th) * G.speed; b.vy = -Math.cos(th) * G.speed;
 }
 function stepBall(b, dt) {
-  if (G.assist.length) funnel(b, dt);
+  if (G.suction && G.assist.length) funnel(b, dt);
   const dist = G.speed * dt, n = Math.max(1, Math.ceil(dist / 1.2)), st = dt / n;
   for (let i = 0; i < n; i++) {
     b.x += b.vx * st; b.y += b.vy * st;
@@ -654,11 +658,18 @@ window.addEventListener('keydown', e => {
     initAudio(); e.preventDefault();
     if (G.state === 'ready') launch(); else if (G.state === 'over') newGame();
   } else if (e.key === 'm') toggleMute();
+  else if (e.key === 'f') setSuction(!G.suction);
 });
 window.addEventListener('keyup', e => {
   if (e.key === 'ArrowLeft' || e.key === 'a') G.keys.l = false;
   else if (e.key === 'ArrowRight' || e.key === 'd') G.keys.r = false;
 });
+function setSuction(on) {
+  G.suction = on; suckBtn.textContent = '🧲 吸引 ' + (on ? 'ON' : 'OFF'); suckBtn.classList.toggle('off', !on);
+  try { localStorage.setItem('sb-suction', on ? '1' : '0'); } catch (e) {}
+}
+try { if (localStorage.getItem('sb-suction') === '0') setSuction(false); } catch (e) {}
+suckBtn.addEventListener('pointerdown', e => { e.stopPropagation(); setSuction(!G.suction); });
 function toggleMute() {
   muted = !muted; muteBtn.textContent = muted ? '🔇' : '🔊';
   try { localStorage.setItem('sb-muted', muted ? '1' : '0'); } catch (e) {}
