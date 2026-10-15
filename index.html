@@ -173,7 +173,7 @@ function buildLevel(n) {
   // ball-increasing orbs go near the channel (front), the rest anywhere higher up
   const near = [], far = [];
   for (let r = 6; r < 41; r++) for (let c = 6; c < COLS - 6; c++) if (g[r * COLS + c] === 1) {
-    (r >= 26 && Math.abs(c - 27) < 18 ? near : far).push([c, r]);
+    (r >= 31 && Math.abs(c - 27) < 15 ? near : far).push([c, r]);
   }
   const place = (list, type) => {
     for (let tries = 0; tries < 200 && list.length; tries++) {
