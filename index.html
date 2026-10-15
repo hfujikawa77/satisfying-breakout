@@ -92,23 +92,47 @@ const heart = (u, v) => {
   return a * a * a - x * x * y * y * y < 0;
 };
 const ell = (u, v, cx, cy, rx, ry) => ((u - cx) / rx) ** 2 + ((v - cy) / ry) ** 2 < 1;
+const INVADER = ['00100000100', '00010001000', '00111111100', '01101110110', '11111111111', '10111111101', '10100000101', '00011011000'];
 const SHAPES = [
-  () => true,
-  (u, v) => (u - 0.5) ** 2 + (v - 0.45) ** 2 < 0.2,
+  (u, v) => (u - 0.5) ** 2 + (v - 0.45) ** 2 < 0.2,                       // circle
   heart,
   // tree-shaped hole carved out of a full field
   (u, v) => !(ell(u, v, 0.5, 0.38, 0.4, 0.3) || ell(u, v, 0.3, 0.5, 0.17, 0.14) ||
     ell(u, v, 0.7, 0.5, 0.17, 0.14) || ell(u, v, 0.5, 0.2, 0.17, 0.12) ||
     (u > 0.46 && u < 0.54 && v > 0.55 && v < 0.9)),
-  (u, v) => ((Math.round(u * 50) + Math.round(v * 52)) % 14 + 14) % 14 < 9,
-  (u, v) => Math.sin(u * 10) + Math.sin(v * 9 + u * 4) + Math.sin((u + v) * 7) > -0.9
+  (u, v) => ((Math.round(u * 50) + Math.round(v * 52)) % 14 + 14) % 14 < 9, // diagonal stripes
+  (u, v) => Math.sin(u * 10) + Math.sin(v * 9 + u * 4) + Math.sin((u + v) * 7) > -0.9, // blobs
+  (u, v) => Math.abs(u - 0.5) + Math.abs(v - 0.45) < 0.48,                // diamond
+  (u, v) => {                                                              // star
+    const x = u - 0.5, y = v - 0.47, th = Math.atan2(y, x) + Math.PI / 2, seg = Math.PI * 2 / 5;
+    const k = ((th % seg) + seg) % seg, d = Math.min(k, seg - k) / (seg / 2);
+    return Math.hypot(x, y) < 0.5 - 0.3 * d;
+  },
+  (u, v) => { const r = Math.hypot(u - 0.5, v - 0.45); return r < 0.5 && Math.floor(r * 14) % 2 === 0; }, // rings
+  (u, v) => (Math.floor(u * 8) + Math.floor(v * 8)) % 2 === 0,             // checker
+  (u, v) => {                                                              // smiley
+    const x = u - 0.5, y = v - 0.45, r = Math.hypot(x, y);
+    if (r > 0.47) return false;
+    if (ell(u, v, 0.35, 0.32, 0.06, 0.1) || ell(u, v, 0.65, 0.32, 0.06, 0.1)) return false;
+    if (y > 0.04 && r > 0.25 && r < 0.33) return false;
+    return true;
+  },
+  (u, v) => (Math.floor(v * 52 + Math.sin(u * 14) * 5) % 12 + 12) % 12 < 8, // waves
+  (u, v) => Math.abs(u - 0.5) < 0.17 || Math.abs(v - 0.42) < 0.17,         // cross
+  (u, v) => v < 0.8 && INVADER[Math.floor(v / 0.8 * 8)][Math.min(10, Math.floor(u * 11))] === '1', // invader
+  (u, v) => {                                                              // spiral
+    const x = u - 0.5, y = v - 0.45, r = Math.hypot(x, y), th = Math.atan2(y, x) / (Math.PI * 2);
+    return r < 0.5 && (((r * 9 + th) % 1) + 1) % 1 < 0.55;
+  },
+  (u, v) => v > Math.abs(u - 0.5) * 1.6 && v < 0.9,                        // pyramid
+  (u, v) => Math.floor(Math.max(Math.abs(u - 0.5), Math.abs(v - 0.45)) * 16) % 2 === 0 && Math.max(Math.abs(u - 0.5), Math.abs(v - 0.45)) < 0.5 // nested squares
 ];
 
 // ---------- state ----------
 const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
-  balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
+  order: [], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
   shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1
 };
 window.__G = G; // handy for debugging
@@ -150,7 +174,7 @@ window.addEventListener('resize', resize);
 // ---------- level setup ----------
 function buildLevel(n) {
   const g = G.grid;
-  const shape = SHAPES[n % SHAPES.length];
+  const shape = SHAPES[G.order[n % SHAPES.length]];
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     let t;
     if (c < 2 || c >= COLS - 2 || r < 2 || r >= ROWS - 2) t = 2;
@@ -215,6 +239,7 @@ function resetBall() {
 function newGame() {
   G.level = 0; G.score = 0; G.lives = 3; G.pwTimer = 0; G.pierce = 0; G.pw = 56;
   G.parts.length = 0; G.texts.length = 0;
+  G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
   buildLevel(0); resetBall();
   addText(W / 2, OY + 100, 'LEVEL 1', '#fff', 22, 1.4);
 }
