@@ -109,7 +109,7 @@ const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
   balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
-  shake: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1
+  shake: 0, fail: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1
 };
 window.__G = G; // handy for debugging
 try { G.best = +localStorage.getItem('sb-best') || 0; } catch (e) {}
@@ -169,17 +169,29 @@ function buildLevel(n) {
   G.bricks = b;
   // orbs
   G.orbs = [];
-  const want = 6 + Math.min(n, 4), cand = [];
-  for (let r = 6; r < 38; r++) for (let c = 6; c < COLS - 6; c++) if (g[r * COLS + c] === 1) cand.push([c, r]);
-  for (let tries = 0; tries < 400 && G.orbs.length < want && cand.length; tries++) {
-    const [c, r] = cand[(Math.random() * cand.length) | 0];
-    const x = OX + (c + 0.5) * C, y = OY + (r + 0.5) * C;
-    if (G.orbs.every(o => Math.hypot(o.x - x, o.y - y) > 30)) {
-      const k = Math.random();
-      const type = k < 0.34 ? 'plus3' : k < 0.46 ? 'x2' : k < 0.6 ? 'minus' : k < 0.8 ? 'wide' : 'bomb';
-      G.orbs.push({ x, y, type, ph: Math.random() * 6.28 });
-    }
+  const want = 6 + Math.min(n, 4);
+  // ball-increasing orbs go near the channel (front), the rest anywhere higher up
+  const near = [], far = [];
+  for (let r = 6; r < 41; r++) for (let c = 6; c < COLS - 6; c++) if (g[r * COLS + c] === 1) {
+    (r >= 26 && Math.abs(c - 27) < 18 ? near : far).push([c, r]);
   }
+  const place = (list, type) => {
+    for (let tries = 0; tries < 200 && list.length; tries++) {
+      const [c, r] = list[(Math.random() * list.length) | 0];
+      const x = OX + (c + 0.5) * C, y = OY + (r + 0.5) * C;
+      if (G.orbs.every(o => Math.hypot(o.x - x, o.y - y) > 30)) { G.orbs.push({ x, y, type, ph: Math.random() * 6.28 }); return; }
+    }
+  };
+  const front = near.length ? near : far;
+  place(front, 'plus3'); place(front, 'plus3'); place(front, 'x2');
+  while (G.orbs.length < want) {
+    const k = Math.random();
+    const type = k < 0.2 ? 'plus3' : k < 0.3 ? 'x2' : k < 0.5 ? 'minus' : k < 0.75 ? 'wide' : 'bomb';
+    const before = G.orbs.length;
+    place(type === 'plus3' || type === 'x2' ? front : far.length ? far : near, type);
+    if (G.orbs.length === before && ++G.fail > 50) break;
+  }
+  G.fail = 0;
   G.speed = Math.min(380, 250 * (1 + 0.04 * n));
   renderField();
 }
