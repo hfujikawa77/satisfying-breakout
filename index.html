@@ -434,29 +434,25 @@ function buildLevel(n) {
   // orbs
   G.orbs = []; G.drops = [];
   const want = 14 + Math.min(n, 6);
-  // ball-increasing orbs go near the channel (front), the rest higher up
-  const near = [], mid = [], far = [];
-  for (let r = 6; r < 41; r++) for (let c = 6; c < COLS - 6; c++) if (g[r * COLS + c] === 1) {
-    const dc = Math.min(...G.cavs.map(v => Math.abs(c - v[0])));
-    (r >= 31 && dc < 15 ? near : r >= 22 && dc < 22 ? mid : far).push([c, r]);
-  }
-  const place = (lists, type) => {
-    for (const list of lists) {
-      for (let tries = 0; tries < 120 && list.length; tries++) {
-        const [c, r] = list[(Math.random() * list.length) | 0];
-        const x = OX + (c + 0.5) * C, y = OY + (r + 0.5) * C;
-        if (G.orbs.every(o => Math.hypot(o.x - x, o.y - y) > 22)) { G.orbs.push({ x, y, type, ph: Math.random() * 6.28 }); return true; }
-      }
+  // spread the items over the whole brick area: best-candidate sampling keeps them far apart
+  const cand = [];
+  for (let r = 4; r < ROWS - 5; r++) for (let c = 4; c < COLS - 4; c++) if (g[r * COLS + c] === 1) cand.push([c, r]);
+  const place = type => {
+    let best = null, bd = -1;
+    for (let k = 0; k < 60 && cand.length; k++) {
+      const [c, r] = cand[(Math.random() * cand.length) | 0];
+      const x = OX + (c + 0.5) * C, y = OY + (r + 0.5) * C;
+      let d = 999; for (const o of G.orbs) d = Math.min(d, Math.hypot(o.x - x, o.y - y));
+      if (d > bd) { bd = d; best = [x, y]; }
     }
-    return false;
+    if (!best || bd < 20) return false;
+    G.orbs.push({ x: best[0], y: best[1], type, ph: Math.random() * 6.28 });
+    return true;
   };
-  const front = [near, mid, far], back = [far, mid, near];
-  place(front, 'plus3'); place(front, 'plus3'); place(front, 'x2'); place(front, 'x3'); place(front, 'pierce');
+  for (const t of ['plus3', 'plus3', 'x2', 'x3', 'pierce']) place(t);
   const BAG = ['plus3', 'plus3', 'plus5', 'x2', 'x2', 'x3', 'minus', 'wide', 'wide', 'bomb', 'bomb', 'pierce'];
-  for (let i = 0, fails = 0; G.orbs.length < want && fails < 30; i++) {
-    const type = BAG[(Math.random() * BAG.length) | 0];
-    const up = type === 'plus3' || type === 'plus5' || type === 'x2' || type === 'x3';
-    if (!place(up ? front : back, type)) fails++;
+  for (let fails = 0; G.orbs.length < want && fails < 30;) {
+    if (!place(BAG[(Math.random() * BAG.length) | 0])) fails++;
   }
   G.speed = Math.min(380, 250 * (1 + 0.04 * n));
   renderField();
