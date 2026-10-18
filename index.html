@@ -259,8 +259,12 @@ function sanitize(g) {
   }
   for (let i = 0; i < g.length; i++) if ((g[i] === 1 || g[i] === 3) && !broken[i]) g[i] = 0;
 }
-function putGold(g, c0, r0, w, h) {
-  for (let r = r0; r < r0 + h; r++) for (let c = c0; c < c0 + w; c++) g[r * COLS + c] = 3;
+// gold plug: swaps corridor-wall cells around (px,py) for yellow bricks, so breaking it opens a way into the brick area behind the wall
+function plug(g, px, py) {
+  for (let r = Math.floor(py - 2); r <= Math.ceil(py + 2); r++) for (let c = Math.floor(px - 2); c <= Math.ceil(px + 2); c++) {
+    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
+    if (Math.hypot(c + 0.5 - px, r + 0.5 - py) <= 1.5 && g[r * COLS + c] === 2) g[r * COLS + c] = 3;
+  }
 }
 function ringRect(g, c0, r0, c1, r1) {   // hollow room: 1-thick walls, cleared inside
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
@@ -270,16 +274,16 @@ function ringRect(g, c0, r0, c1, r1) {   // hollow room: 1-thick walls, cleared 
 const MAZES = {
   mazeH(g) {
     const segs = [{ a: [19, 58], b: [19, 23], oa: true, ob: true }, { a: [36, 26], b: [36, 51] }, { a: [19, 36], b: [36, 36] }];
-    corridor(g, segs); putGold(g, 35, 25, 2, 1); putGold(g, 35, 52, 2, 1); return segs;
+    corridor(g, segs); plug(g, 36, 23); plug(g, 33, 44); plug(g, 39, 44); return segs;
   },
   mazeM(g) {
     const segs = [{ a: [27, 58], b: [27, 36], oa: true }, { a: [17, 45], b: [17, 22], ob: true }, { a: [37, 45], b: [37, 22], ob: true },
       { a: [17, 29], b: [27, 36] }, { a: [37, 29], b: [27, 36] }];
-    corridor(g, segs); putGold(g, 16, 44, 2, 1); putGold(g, 36, 44, 2, 1); return segs;
+    corridor(g, segs); plug(g, 17, 48); plug(g, 37, 48); return segs;
   },
   mazeT(g) {
     const segs = [{ a: [27, 58], b: [27, 9], oa: true, ob: true }, { a: [27, 30], b: [13, 30] }];
-    corridor(g, segs); putGold(g, 13, 29, 1, 2); return segs;
+    corridor(g, segs); plug(g, 10, 30); return segs;
   },
   mazeD(g) {
     const segs = [{ a: [27, 58], b: [27, 6], oa: true, ob: true }];
@@ -289,36 +293,36 @@ const MAZES = {
       if (m <= 9) g[r * COLS + c] = 0; else if (m <= 10.5 && r < ROWS - 2) g[r * COLS + c] = 2;
     }
     corridor(g, segs, true);
-    putGold(g, 19, 38, 1, 1); putGold(g, 34, 38, 1, 1); putGold(g, 26, 46, 2, 1); return segs;
+    plug(g, 17.5, 38); plug(g, 36.5, 38); plug(g, 27, 48); return segs;
   },
   mazeLadder(g) {
     const segs = [{ a: [27, 58], b: [27, 12], oa: true, ob: true }, { a: [12, 48], b: [12, 22] }, { a: [42, 48], b: [42, 22] },
       { a: [12, 30], b: [42, 30] }, { a: [12, 42], b: [42, 42] }];
-    corridor(g, segs); putGold(g, 11, 21, 2, 1); putGold(g, 41, 21, 2, 1); putGold(g, 11, 47, 2, 1); putGold(g, 41, 47, 2, 1); return segs;
+    corridor(g, segs); plug(g, 12, 19); plug(g, 42, 19); plug(g, 12, 51); plug(g, 42, 51); return segs;
   },
   mazeFish(g) {
     const segs = [{ a: [27, 58], b: [27, 8], oa: true, ob: true }, { a: [27, 44], b: [15, 36] }, { a: [27, 36], b: [39, 28] }, { a: [27, 28], b: [15, 20] }];
-    corridor(g, segs); putGold(g, 14, 35, 2, 2); putGold(g, 38, 27, 2, 2); putGold(g, 14, 19, 2, 2); return segs;
+    corridor(g, segs); plug(g, 12.5, 34.4); plug(g, 41.5, 26.4); plug(g, 12.5, 18.4); return segs;
   },
   mazePlus(g) {
     const segs = [{ a: [27, 58], b: [27, 10], oa: true, ob: true }, { a: [10, 32], b: [44, 32] }];
-    corridor(g, segs); putGold(g, 9, 31, 1, 2); putGold(g, 44, 31, 1, 2); return segs;
+    corridor(g, segs); plug(g, 7, 32); plug(g, 47, 32); return segs;
   },
   mazeFork(g) {
     const segs = [{ a: [27, 58], b: [27, 36], oa: true }, { a: [27, 36], b: [27, 9], ob: true }, { a: [27, 36], b: [11, 18] }, { a: [27, 36], b: [43, 18] }];
-    corridor(g, segs); putGold(g, 10, 17, 2, 2); putGold(g, 42, 17, 2, 2); return segs;
+    corridor(g, segs); plug(g, 9, 15.8); plug(g, 45, 15.8); return segs;
   },
   mazeTree(g) {
     const segs = [{ a: [27, 58], b: [27, 8], oa: true, ob: true }, { a: [27, 44], b: [13, 44] }, { a: [27, 36], b: [41, 36] },
       { a: [27, 28], b: [13, 28] }, { a: [27, 20], b: [41, 20] }];
-    corridor(g, segs); putGold(g, 13, 43, 1, 2); putGold(g, 40, 35, 1, 2); putGold(g, 13, 27, 1, 2); putGold(g, 40, 19, 1, 2); return segs;
+    corridor(g, segs); plug(g, 10, 44); plug(g, 44, 36); plug(g, 10, 28); plug(g, 44, 20); return segs;
   },
   mazeR(g) {
     const segs = [{ a: [27, 58], b: [27, 14], oa: true, ob: true }];
     corridor(g, segs);
     ringRect(g, 17, 40, 38, 55);
     corridor(g, segs, true);
-    putGold(g, 19, 52, 1, 1); putGold(g, 36, 52, 1, 1); return segs;
+    plug(g, 17.5, 52.5); plug(g, 38.5, 52.5); return segs;
   }
 };
 
