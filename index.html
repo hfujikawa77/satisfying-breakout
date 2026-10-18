@@ -195,11 +195,104 @@ const SHAPES = [
     !(E(x, y, .78, .2, .03, .04) || RC(x, y, .86, .31, .96, .33)))
 ];
 
+// ---------- maze stages (inspired by the reference clips) ----------
+// corridor: segments {a:[x,y], b:[x,y], oa, ob}; x/y are cell-edge coords, gap is 4 cells wide, walls 2 thick.
+// oa/ob = open end (no cap, flat cut); otherwise the end is capped round.
+function corridor(g, segs, maskOnly) {
+  const wall = new Uint8Array(g.length), mask = new Uint8Array(g.length);
+  for (const sg of segs) {
+    const [ax, ay] = sg.a, [bx, by] = sg.b, dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      const px = c + 0.5 - ax, py = r + 0.5 - ay;
+      let t = (px * dx + py * dy) / L2;
+      if (t < 0) { if (sg.oa) continue; t = 0; } else if (t > 1) { if (sg.ob) continue; t = 1; }
+      const d = Math.hypot(px - t * dx, py - t * dy);
+      if (d <= 2) mask[r * COLS + c] = 1; else if (d <= 4) wall[r * COLS + c] = 1;
+    }
+  }
+  for (let i = 0; i < g.length; i++) {
+    if (mask[i]) g[i] = 0; else if (wall[i] && !maskOnly) g[i] = 2;
+  }
+}
+// remove bricks the ball can never touch (sealed off by indestructible walls), so every stage is clearable
+function sanitize(g) {
+  const seen = new Uint8Array(g.length), st = [];
+  const flood = () => {
+    while (st.length) {
+      const i = st.pop(), c = i % COLS, r = (i / COLS) | 0;
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const x = c + dc, y = r + dr;
+        if (x < 0 || y < 0 || x >= COLS || y >= ROWS) continue;
+        const j = y * COLS + x;
+        if (!seen[j] && g[j] === 0) { seen[j] = 1; st.push(j); }
+      }
+    }
+  };
+  for (let c = 0; c < COLS; c++) if (g[(ROWS - 1) * COLS + c] === 0) { seen[(ROWS - 1) * COLS + c] = 1; st.push((ROWS - 1) * COLS + c); }
+  flood();
+  const broken = new Uint8Array(g.length);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      const i = r * COLS + c;
+      if ((g[i] !== 1 && g[i] !== 3) || broken[i]) continue;
+      let touch = false;
+      for (let dr = -1; dr <= 1 && !touch; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const x = c + dc, y = r + dr;
+        if (x >= 0 && y >= 0 && x < COLS && y < ROWS && seen[y * COLS + x]) { touch = true; break; }
+      }
+      if (touch) { broken[i] = 1; seen[i] = 1; st.push(i); changed = true; }
+    }
+    flood();
+  }
+  for (let i = 0; i < g.length; i++) if ((g[i] === 1 || g[i] === 3) && !broken[i]) g[i] = 0;
+}
+function putGold(g, c0, r0, w, h) {
+  for (let r = r0; r < r0 + h; r++) for (let c = c0; c < c0 + w; c++) g[r * COLS + c] = 3;
+}
+function ringRect(g, c0, r0, c1, r1) {   // hollow room: 1-thick walls, cleared inside
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    g[r * COLS + c] = (r === r0 || r === r1 || c === c0 || c === c1) ? 2 : 0;
+  }
+}
+const MAZES = {
+  mazeH(g) {
+    const segs = [{ a: [19, 58], b: [19, 23], oa: true, ob: true }, { a: [36, 26], b: [36, 51] }, { a: [19, 36], b: [36, 36] }];
+    corridor(g, segs); putGold(g, 35, 25, 2, 1); putGold(g, 35, 52, 2, 1); return segs;
+  },
+  mazeM(g) {
+    const segs = [{ a: [27, 58], b: [27, 36], oa: true }, { a: [17, 45], b: [17, 22], ob: true }, { a: [37, 45], b: [37, 22], ob: true },
+      { a: [17, 29], b: [27, 36] }, { a: [37, 29], b: [27, 36] }];
+    corridor(g, segs); putGold(g, 16, 44, 2, 1); putGold(g, 36, 44, 2, 1); return segs;
+  },
+  mazeT(g) {
+    const segs = [{ a: [27, 58], b: [27, 9], oa: true, ob: true }, { a: [27, 30], b: [13, 30] }];
+    corridor(g, segs); putGold(g, 13, 29, 1, 2); return segs;
+  },
+  mazeD(g) {
+    const segs = [{ a: [27, 58], b: [27, 6], oa: true, ob: true }];
+    corridor(g, segs);
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      const m = Math.abs(c + 0.5 - 27) + Math.abs(r + 0.5 - 38);
+      if (m <= 9) g[r * COLS + c] = 0; else if (m <= 10.5 && r < ROWS - 2) g[r * COLS + c] = 2;
+    }
+    corridor(g, segs, true);
+    putGold(g, 19, 38, 1, 1); putGold(g, 34, 38, 1, 1); putGold(g, 26, 46, 2, 1); return segs;
+  },
+  mazeR(g) {
+    const segs = [{ a: [27, 58], b: [27, 14], oa: true, ob: true }];
+    corridor(g, segs);
+    ringRect(g, 17, 40, 38, 55);
+    corridor(g, segs, true);
+    putGold(g, 19, 52, 1, 1); putGold(g, 36, 52, 1, 1); return segs;
+  }
+};
+
 // ---------- state ----------
 const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
-  order: [], assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
+  order: [], pal: null, assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
   shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1, suction: true
 };
 window.__G = G; // handy for debugging
@@ -207,11 +300,23 @@ G.build = n => buildLevel(n); G.update = dt => update(dt); G.launch = () => laun
 try { G.best = +localStorage.getItem('sb-best') || 0; } catch (e) {}
 
 // ---------- field rendering ----------
+const PALETTES = [
+  { fill: '#48b81d', edge: '#2b7a13', hi: '#7be83a' },   // green
+  { fill: '#ee8a2a', edge: '#9c4f14', hi: '#ffb460' },   // orange
+  { fill: '#8e2a9e', edge: '#521160', hi: '#c05ad0' },   // purple
+  { fill: '#f0e21a', edge: '#9a9010', hi: '#fff77a' },   // yellow
+  { fill: '#e0243a', edge: '#80101e', hi: '#ff6a7a' },   // red
+  { fill: '#2bb8c8', edge: '#16707c', hi: '#7aeaf4' },   // cyan
+  { fill: '#e060a0', edge: '#8c3262', hi: '#ff9acb' }    // pink
+];
 function drawCell(c, r, t) {
   const fy = r * C, fx = c * C;
   if (t === 1) {
-    fctx.fillStyle = '#2b7a13'; fctx.fillRect(fx, fy, C, C);
-    fctx.fillStyle = '#48b81d'; fctx.fillRect(fx, fy, C - 1, C - 1);
+    fctx.fillStyle = G.pal.edge; fctx.fillRect(fx, fy, C, C);
+    fctx.fillStyle = G.pal.fill; fctx.fillRect(fx, fy, C - 1, C - 1);
+  } else if (t === 3) {
+    fctx.fillStyle = '#a07800'; fctx.fillRect(fx, fy, C, C);
+    fctx.fillStyle = '#ffd21a'; fctx.fillRect(fx, fy, C - 1, C - 1);
   } else if (t === 2) {
     fctx.fillStyle = '#4a4a4a'; fctx.fillRect(fx, fy, C, C);
     fctx.fillStyle = '#8c8c8c'; fctx.fillRect(fx, fy, C - 1, C - 1);
@@ -242,7 +347,9 @@ window.addEventListener('resize', resize);
 // ---------- level setup ----------
 function buildLevel(n) {
   const g = G.grid;
-  const shape = SHAPES[G.order[n % SHAPES.length]];
+  let T = G.tubes[n % G.tubes.length];
+  const shape = MAZES[T] ? () => true : SHAPES[G.order[n % SHAPES.length]];
+  const prev = G.pal; do { G.pal = PALETTES[(Math.random() * PALETTES.length) | 0]; } while (G.pal === prev);
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     let t;
     if (c < 2 || c >= COLS - 2 || r < 2 || r >= ROWS - 2) t = 2;
@@ -250,7 +357,6 @@ function buildLevel(n) {
     g[r * COLS + c] = t;
   }
   // channels: each is a gap (default 4 wide) with 2-thick walls; diagonal ones shift 1 col per `step` rows above row `base`
-  let T = G.tubes[n % G.tubes.length];
   const defs = T === 'twin' ? [{ L0: 14, top: 42, dir: 0 }, { L0: 36, top: 42, dir: 0 }]
     : T === 'diagL' ? [{ L0: 29, top: 34, dir: -1, base: 55, step: 5, w: 8 }]   // diagonal all the way
     : T === 'diagR' ? [{ L0: 21, top: 34, dir: 1, base: 55, step: 5, w: 8 }]
@@ -259,7 +365,17 @@ function buildLevel(n) {
     : T === 'flare' ? [{ L0: 16, top: 34, dir: -1, base: 55, step: 5, w: 8 }, { L0: 30, top: 34, dir: 1, base: 55, step: 5, w: 8 }]
     : [{ L0: 25, top: TUBE_TOP, dir: 0 }];
   G.aim = []; G.cavs = []; G.assist = [];
-  for (const d of defs) {
+  if (MAZES[T]) {
+    const segs = MAZES[T](g);
+    for (const sg of segs) {
+      if (sg.oa && sg.a[1] > ROWS) { G.aim.push(OX + sg.a[0] * C); G.assist.push({ x: OX + sg.a[0] * C, ax: 0 }); }
+      if (sg.ob) {
+        const dx = sg.b[0] - sg.a[0], dy = sg.b[1] - sg.a[1], L = Math.hypot(dx, dy);
+        G.cavs.push([sg.b[0] + dx / L * 3, sg.b[1] + dy / L * 3]);
+      }
+    }
+  }
+  for (const d of MAZES[T] ? [] : defs) {
     for (let r = d.top; r < ROWS; r++) {
       const w = d.w || 4, gl = d.L0 + d.dir * Math.floor(Math.max(0, (d.base || 48) - r) / (d.step || 2));
       for (const c of [gl - 2, gl - 1, gl + w, gl + w + 1]) g[r * COLS + c] = 2;
@@ -274,7 +390,8 @@ function buildLevel(n) {
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     if (g[r * COLS + c] === 1 && G.cavs.some(([cx, cy]) => (c + 0.5 - cx) ** 2 + (r + 0.5 - cy) ** 2 < 25)) g[r * COLS + c] = 0;
   }
-  let b = 0; for (let i = 0; i < g.length; i++) if (g[i] === 1) b++;
+  sanitize(g);
+  let b = 0; for (let i = 0; i < g.length; i++) if (g[i] === 1 || g[i] === 3) b++;
   G.bricks = b;
   // orbs
   G.orbs = [];
@@ -325,7 +442,7 @@ function newGame() {
   G.level = 0; G.score = 0; G.lives = 3; G.pwTimer = 0; G.pierce = 0; G.pw = 56;
   G.parts.length = 0; G.texts.length = 0;
   G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
-  const kinds = ['center', 'twin', 'triple', 'diagL', 'diagR', 'vee', 'flare'];
+  const kinds = ['center', 'twin', 'triple', 'diagL', 'diagR', 'vee', 'flare', 'mazeH', 'mazeM', 'mazeT', 'mazeD', 'mazeR'];
   G.tubes = [];
   for (let i = 0; i < SHAPES.length; i++) {
     let k; do { k = kinds[(Math.random() * kinds.length) | 0]; } while (k === G.tubes[i - 1]);
@@ -358,16 +475,17 @@ function burst(x, y, color, n, spd) {
   }
 }
 function destroyCell(c, r) {
-  const i = r * COLS + c;
-  if (G.grid[i] !== 1) return;
+  const i = r * COLS + c, gold = G.grid[i] === 3;
+  if (G.grid[i] !== 1 && !gold) return;
   G.grid[i] = 0;
   fctx.setTransform(scale, 0, 0, scale, 0, 0);
   fctx.clearRect(c * C, r * C, C, C);
   G.bricks--; G.score++;
   const x = OX + (c + 0.5) * C, y = OY + (r + 0.5) * C;
   for (let k = 0; k < 2 && G.parts.length < 2500; k++) {
-    G.parts.push({ x, y, vx: (Math.random() - 0.5) * 70, vy: -Math.random() * 60, life: 0.5 + Math.random() * 0.5, t: 0, col: Math.random() < 0.5 ? '#48b81d' : '#7be83a', sz: 2 + Math.random() * 1.5, g: 260 });
+    G.parts.push({ x, y, vx: (Math.random() - 0.5) * 70, vy: -Math.random() * 60, life: 0.5 + Math.random() * 0.5, t: 0, col: gold ? '#ffd21a' : Math.random() < 0.5 ? G.pal.fill : G.pal.hi, sz: 2 + Math.random() * 1.5, g: 260 });
   }
+  if (gold) { spawnBalls(x, y, 2); burst(x, y, '#ffd21a', 16, 90); addText(x, y - 6, '+2', '#ffd21a', 11, 0.8); G.score += 20; }
   brickSound();
   if (G.shake < 1.2) G.shake += 0.1;
 }
@@ -444,14 +562,17 @@ function collideGrid(b) {
     }
     if (best < 0) return;
     if (best === 2) wallSound();
-    if (best === 1 && G.pierce > 0) { destroyCell(bc, br); continue; }
+    if ((best === 1 || best === 3) && G.pierce > 0) { destroyCell(bc, br); continue; }
     const dot = b.vx * bnx + b.vy * bny;
     if (dot < 0) { b.vx -= 2 * dot * bnx; b.vy -= 2 * dot * bny; }
     b.x += bnx * (R - bdist + 0.01); b.y += bny * (R - bdist + 0.01);
-    if (best === 1) destroyCell(bc, br);
+    if (best === 1 || best === 3) destroyCell(bc, br);
     // keep speed constant and avoid endless flat trajectories
     let m = Math.hypot(b.vx, b.vy) || 1;
-    b.vx = b.vx / m * G.speed; b.vy = b.vy / m * G.speed;
+    // tiny random deflection so perfectly symmetric bounces never loop forever
+    const jt = (Math.random() - 0.5) * 0.06, cj = Math.cos(jt), sj = Math.sin(jt);
+    const jx = b.vx * cj - b.vy * sj, jy = b.vx * sj + b.vy * cj;
+    b.vx = jx / m * G.speed; b.vy = jy / m * G.speed;
     const minV = G.speed * 0.18;
     if (Math.abs(b.vy) < minV) {
       b.vy = (b.vy < 0 ? -1 : 1) * minV;
@@ -466,6 +587,8 @@ function funnel(b, dt) {
   let a = null;
   for (const q of G.assist) if (!a || Math.abs(b.x - q.x) < Math.abs(b.x - a.x)) a = q;
   if (!a || b.y - FIELD_BOTTOM > 150 || Math.abs(b.x - a.x) > 100) return;
+  // already heading into the entrance? then leave the player's angle alone
+  if (!a.ax && Math.abs(b.x + b.vx / -b.vy * (b.y - FIELD_BOTTOM) - a.x) < 8) return;
   const ty = b.y - 40, tx = a.x + a.ax * (FIELD_BOTTOM - ty);
   const cur = Math.atan2(b.vx, -b.vy), want = Math.atan2(tx - b.x, b.y - ty);
   let d = want - cur;
