@@ -336,7 +336,7 @@ const MAZES = {
 // ---------- state ----------
 const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
-  bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
+  bricks: 0, px: W / 2, target: W / 2, pw: 56, pwBase: 56,
   order: [], drops: [], pal: null, assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
   shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1, suction: true
 };
@@ -480,7 +480,7 @@ function resetBall() {
   G.state = 'ready';
 }
 function newGame() {
-  G.level = 0; G.score = 0; G.lives = 3; G.pwTimer = 0; G.pierce = 0; G.pw = 56;
+  G.level = 0; G.score = 0; G.lives = 3; G.pwBase = 56; G.pierce = 0; G.pw = 56;
   G.parts.length = 0; G.texts.length = 0;
   G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
   const kinds = ['center', 'twin', 'triple', 'diagL', 'diagR', 'vee', 'flare', 'mazeH', 'mazeM', 'mazeT', 'mazeD', 'mazeR', 'mazeLadder', 'mazeFish', 'mazePlus', 'mazeFork', 'mazeTree'];
@@ -585,8 +585,8 @@ function applyOrb(type, x, y) {
       orbSound(true); break;
     }
     case 'pierce': G.pierce = 8; orbSound(true); tone(660, 0.3, 'triangle', 0.05, 2); break;
-    case 'minus': G.pwKind = -1; G.pwTimer = 12; orbSound(false); break;
-    case 'wide': G.pwKind = 1; G.pwTimer = 12; orbSound(true); break;
+    case 'minus': G.pwBase = Math.max(30, G.pwBase - 14); orbSound(false); break;
+    case 'wide': G.pwBase = Math.min(200, G.pwBase + 18); orbSound(true); break;   // stacks with every pickup
     case 'bomb': {   // carpet-bomb a few random spots of the remaining wall of bricks
       const cells = [];
       for (let i = 0; i < G.grid.length; i++) if (G.grid[i] === 1) cells.push(i);
@@ -683,11 +683,7 @@ function update(dt) {
   if (G.keys.r) G.target += 420 * dt;
   G.target = Math.max(G.pw / 2 + 2, Math.min(W - G.pw / 2 - 2, G.target));
   G.px += (G.target - G.px) * (1 - Math.exp(-dt * 40));
-  if (G.pwTimer > 0) {
-    G.pwTimer -= dt;
-    if (G.pwTimer <= 0) { G.pwKind = 0; G.pwTimer = 0; }
-  }
-  const wantW = G.pwKind > 0 ? 88 : G.pwKind < 0 ? 34 : 56;
+  const wantW = G.pwBase;
   G.pw += (wantW - G.pw) * (1 - Math.exp(-dt * 12));
   G.bump = Math.max(0, G.bump - dt * 8);
   if (G.pierce > 0) G.pierce = Math.max(0, G.pierce - dt);
@@ -726,7 +722,7 @@ function update(dt) {
           G.state = 'over'; G.overAt = performance.now();
           if (G.score > G.best) { G.best = G.score; try { localStorage.setItem('sb-best', G.best); } catch (e) {} }
         } else {
-          G.pwKind = 0; G.pwTimer = 0; G.pierce = 0; G.drops = [];
+          G.pwBase = 56; G.pierce = 0; G.drops = [];
           resetBall();
           addText(W / 2, OY + 110, 'MISS', ORANGE, 20, 1.0);
         }
@@ -734,7 +730,7 @@ function update(dt) {
     } else {
       G.timer -= dt;
       if (G.timer <= 0) {
-        G.level++; G.pwKind = 0; G.pwTimer = 0; G.pierce = 0;
+        G.level++; G.pierce = 0;
         buildLevel(G.level); resetBall();
         addText(W / 2, OY + 100, 'LEVEL ' + (G.level + 1), '#fff', 22, 1.4);
       }
@@ -797,7 +793,7 @@ function draw(now) {
   ctx.fillStyle = ORANGE; ctx.fillRect(0, DEAD_Y + 2, W, 6);
   // paddle
   const pw = G.pw, ph = PH + G.bump * 2;
-  ctx.fillStyle = G.pwKind > 0 ? '#ff8fbf' : G.pwKind < 0 ? '#c9452b' : ORANGE;
+  ctx.fillStyle = G.pwBase > 60 ? '#ff8fbf' : G.pwBase < 52 ? '#c9452b' : ORANGE;
   rrect(G.px - pw / 2, PADDLE_Y - ph / 2, pw, ph, 3); ctx.fill();
   // balls
   ctx.fillStyle = G.pierce > 0 ? '#e0c8ff' : '#fff'; ctx.beginPath();
@@ -870,7 +866,7 @@ window.addEventListener('keyup', e => {
 // continue from the same stage: bricks stay as they are, lives are refilled, score is kept
 function continueGame() {
   if (G.state !== 'over') return;
-  G.lives = 3; G.pwKind = 0; G.pwTimer = 0; G.pierce = 0; G.drops = [];
+  G.lives = 3; G.pwBase = 56; G.pierce = 0; G.drops = [];
   resetBall();
   addText(W / 2, OY + 110, 'CONTINUE', '#fff', 20, 1.2);
 }
