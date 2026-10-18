@@ -326,7 +326,7 @@ const MAZES = {
 const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwTimer: 0, pwKind: 0,
-  order: [], pal: null, assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
+  order: [], drops: [], pal: null, assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
   shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1, suction: true
 };
 window.__G = G; // handy for debugging
@@ -428,7 +428,7 @@ function buildLevel(n) {
   let b = 0; for (let i = 0; i < g.length; i++) if (g[i] === 1 || g[i] === 3) b++;
   G.bricks = b;
   // orbs
-  G.orbs = [];
+  G.orbs = []; G.drops = [];
   const want = 14 + Math.min(n, 6);
   // ball-increasing orbs go near the channel (front), the rest higher up
   const near = [], mid = [], far = [];
@@ -532,18 +532,42 @@ function spawnBalls(x, y, n) {
     G.balls.push({ x, y, vx: Math.cos(a) * G.speed, vy: Math.sin(a) * G.speed });
   }
 }
-function popOrb(o) {
+// a ball hit releases the item: it drops down and only takes effect when the paddle catches it
+function hitOrb(o) {
   const i = G.orbs.indexOf(o); if (i < 0) return;
   G.orbs.splice(i, 1);
-  const d = ORB[o.type];
+  G.drops.push({ x: o.x, y: o.y, vy: 25, type: o.type, ph: o.ph });
+  burst(o.x, o.y, ORB[o.type].col, 12, 70);
+  tone(740, 0.07, 'sine', 0.12);
+}
+function spawnUp(x, y, n) {
+  popSound(n);
+  for (let i = 0; i < n && G.balls.length < MAXB; i++) {
+    const a = (Math.random() - 0.5) * 2.0;   // fan upward from the paddle
+    G.balls.push({ x, y, vx: Math.sin(a) * G.speed, vy: -Math.cos(a) * G.speed });
+  }
+}
+function explode(x, y, rad) {
+  const c0 = Math.floor((x - rad - OX) / C), c1 = Math.floor((x + rad - OX) / C);
+  const r0 = Math.floor((y - rad - OY) / C), r1 = Math.floor((y + rad - OY) / C);
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
+    if (Math.hypot(OX + (c + 0.5) * C - x, OY + (r + 0.5) * C - y) < rad) destroyCell(c, r);
+  }
+  G.shake = 4; burst(x, y, '#ffd060', 40, 160);
+  tone(90, 0.4, 'sawtooth', 0.1, 0.3);
+  for (const q of G.orbs.slice()) if (Math.hypot(q.x - x, q.y - y) < rad) hitOrb(q);
+}
+function applyOrb(type, x, y) {
+  const d = ORB[type];
   G.score += 50;
-  burst(o.x, o.y, d.col, 24, 110);
-  addText(o.x, o.y - 8, d.txt, d.col, 14, 0.9);
-  switch (o.type) {
-    case 'plus3': spawnBalls(o.x, o.y, 3); orbSound(true); break;
-    case 'plus5': spawnBalls(o.x, o.y, 5); orbSound(true); break;
+  burst(x, y, d.col, 24, 110);
+  addText(x, y - 8, d.txt, d.col, 14, 0.9);
+  switch (type) {
+    case 'plus3': spawnUp(x, y - 8, 3); orbSound(true); break;
+    case 'plus5': spawnUp(x, y - 8, 5); orbSound(true); break;
     case 'x2': case 'x3': {
-      const k = o.type === 'x3' ? 2 : 1, cur = G.balls.slice();
+      const k = type === 'x3' ? 2 : 1, cur = G.balls.slice();
       popSound(k + 2);
       for (const b of cur) {
         for (let j = 0; j < k && G.balls.length < MAXB; j++) {
@@ -556,17 +580,13 @@ function popOrb(o) {
     case 'pierce': G.pierce = 8; orbSound(true); tone(660, 0.3, 'triangle', 0.05, 2); break;
     case 'minus': G.pwKind = -1; G.pwTimer = 12; orbSound(false); break;
     case 'wide': G.pwKind = 1; G.pwTimer = 12; orbSound(true); break;
-    case 'bomb': {
-      const rad = 30;
-      const c0 = Math.floor((o.x - rad - OX) / C), c1 = Math.floor((o.x + rad - OX) / C);
-      const r0 = Math.floor((o.y - rad - OY) / C), r1 = Math.floor((o.y + rad - OY) / C);
-      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-        if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
-        if (Math.hypot(OX + (c + 0.5) * C - o.x, OY + (r + 0.5) * C - o.y) < rad) destroyCell(c, r);
+    case 'bomb': {   // carpet-bomb a few random spots of the remaining wall of bricks
+      const cells = [];
+      for (let i = 0; i < G.grid.length; i++) if (G.grid[i] === 1) cells.push(i);
+      for (let k = 0; k < 3 && cells.length; k++) {
+        const i = cells[(Math.random() * cells.length) | 0];
+        setTimeout(() => explode(OX + ((i % COLS) + 0.5) * C, OY + (((i / COLS) | 0) + 0.5) * C, 26), k * 140);
       }
-      G.shake = 4; burst(o.x, o.y, '#ffd060', 40, 160);
-      tone(90, 0.4, 'sawtooth', 0.1, 0.3);
-      for (const q of G.orbs.slice()) if (Math.hypot(q.x - o.x, q.y - o.y) < rad) popOrb(q);
       break;
     }
   }
@@ -673,8 +693,16 @@ function update(dt) {
     // orbs
     for (const o of G.orbs.slice()) {
       for (const b of G.balls) {
-        if (Math.hypot(b.x - o.x, b.y - o.y) < ORB_R + R) { popOrb(o); break; }
+        if (Math.hypot(b.x - o.x, b.y - o.y) < ORB_R + R) { hitOrb(o); break; }
       }
+    }
+    // falling items: caught by the paddle = activated
+    for (let k = G.drops.length - 1; k >= 0; k--) {
+      const d = G.drops[k];
+      d.vy = Math.min(150, d.vy + 110 * dt); d.y += d.vy * dt;
+      if (d.y + ORB_R >= PADDLE_Y - PH / 2 && d.y - ORB_R <= PADDLE_Y + PH / 2 && Math.abs(d.x - G.px) <= G.pw / 2 + ORB_R) {
+        G.drops.splice(k, 1); applyOrb(d.type, G.px, PADDLE_Y - 14);
+      } else if (d.y - ORB_R > DEAD_Y) G.drops.splice(k, 1);
     }
     const before = G.balls.length;
     G.balls = G.balls.filter(b => !b.dead);
@@ -691,7 +719,7 @@ function update(dt) {
           G.state = 'over';
           if (G.score > G.best) { G.best = G.score; try { localStorage.setItem('sb-best', G.best); } catch (e) {} }
         } else {
-          G.pwKind = 0; G.pwTimer = 0; G.pierce = 0;
+          G.pwKind = 0; G.pwTimer = 0; G.pierce = 0; G.drops = [];
           resetBall();
           addText(W / 2, OY + 110, 'MISS', ORANGE, 20, 1.0);
         }
@@ -745,6 +773,14 @@ function draw(now) {
     ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1; ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.font = 'bold 9px ' + FONT; ctx.fillText(d.txt, o.x, o.y + 0.5);
   }
+  // falling items
+  for (const d of G.drops) {
+    const c = ORB[d.type];
+    ctx.globalAlpha = 0.25; ctx.fillStyle = c.col; ctx.beginPath(); ctx.arc(d.x, d.y - 8, ORB_R * 0.8, 0, 6.283); ctx.fill();
+    ctx.globalAlpha = 1; ctx.fillStyle = c.col; ctx.beginPath(); ctx.arc(d.x, d.y, ORB_R, 0, 6.283); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 9px ' + FONT; ctx.fillText(c.txt, d.x, d.y + 0.5);
+  }
   // particles
   for (const p of G.parts) {
     ctx.globalAlpha = 1 - p.t / p.life; ctx.fillStyle = p.col; ctx.fillRect(p.x, p.y, p.sz, p.sz);
@@ -775,7 +811,7 @@ function draw(now) {
     ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '12px ' + FONT;
     ctx.fillText('ドラッグでパドル移動 / タップで発射', W / 2, 395);
     ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.font = '10px ' + FONT;
-    ctx.fillText('ボールは通路から上へ', W / 2, 412);
+    ctx.fillText('ボールは通路から上へ / 落ちるアイテムをパドルで拾おう', W / 2, 412);
   }
   if (G.state === 'over') {
     ctx.fillStyle = 'rgba(0,0,0,.72)'; ctx.fillRect(0, 130, W, 150);
