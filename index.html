@@ -15,6 +15,7 @@ canvas{display:block;touch-action:none}
 #cont,#again{position:absolute;left:50%;transform:translateX(-50%);display:none;width:62%;height:38px;border-radius:19px;border:0;font:bold 14px/38px system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;cursor:pointer;color:#fff}
 #cont{top:43%;background:#ff6b4a}
 #again{top:52%;background:#3a3a3a}
+#toast{position:absolute;left:50%;transform:translateX(-50%);bottom:64px;max-width:86%;background:rgba(0,0,0,.85);color:#fff;font:12px/1.5 system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;padding:8px 14px;border-radius:12px;text-align:center;opacity:0;transition:opacity .3s;pointer-events:none}
 #mute{position:absolute;right:10px;bottom:10px;width:34px;height:34px;border-radius:50%;border:0;background:#262626;color:#fff;font-size:16px;line-height:34px;padding:0;cursor:pointer;opacity:.85}
 </style>
 </head>
@@ -25,6 +26,7 @@ canvas{display:block;touch-action:none}
   <button id="share" title="Xに投稿">𝕏 に投稿</button>
   <button id="cont">▶ コンティニュー</button>
   <button id="again">最初から</button>
+  <div id="toast"></div>
   <button id="mute" title="Sound (M)">🔊</button>
 </div>
 <script>
@@ -879,13 +881,40 @@ function setSuction(on) {
 try { if (localStorage.getItem('sb-suction') === '0') setSuction(false); } catch (e) {}
 suckBtn.addEventListener('pointerdown', e => { e.stopPropagation(); setSuction(!G.suction); });
 shareBtn.addEventListener('pointerdown', e => e.stopPropagation());
-shareBtn.addEventListener('click', () => {
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.opacity = 0; }, 3500);
+}
+// share the final screen: mobile opens the share sheet with the image attached; PC copies/saves the image and opens the X compose window
+shareBtn.addEventListener('click', async () => {
   const best = Math.max(G.best, G.score);
   const text = 'Satisfying Breakout で ' + G.score + '点（LV' + (G.level + 1) + '）！ベスト ' + best + '点 #SatisfyingBreakout';
   const url = location.origin + location.pathname;
   const href = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text) + '&url=' + encodeURIComponent(url);
+  let blob = null;
+  try { blob = await new Promise(res => cv.toBlob(res, 'image/png')); } catch (e) {}
+  if (blob) {
+    const file = new File([blob], 'satisfying-breakout.png', { type: 'image/png' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text, url });
+        return;
+      }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    let copied = false;
+    try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); copied = true; } catch (e) {}
+    if (!copied) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'satisfying-breakout.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+    toast(copied ? '画像をコピーしました。投稿画面で貼り付けてください' : '画像を保存しました。投稿画面で添付してください');
+  }
   window.open(href, '_blank', 'noopener');
 });
+
 function toggleMute() {
   muted = !muted; muteBtn.textContent = muted ? '🔇' : '🔊';
   try { localStorage.setItem('sb-muted', muted ? '1' : '0'); } catch (e) {}
