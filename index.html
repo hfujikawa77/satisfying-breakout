@@ -762,7 +762,7 @@ function update(dt) {
     } else {
       G.timer -= dt;
       if (G.timer <= 0) {
-        G.level++; G.pierce = 0;
+        G.level++; G.pierce = 0; G.pwBase = 56;
         buildLevel(G.level); resetBall();
         addText(W / 2, OY + 100, 'LEVEL ' + (G.level + 1), '#fff', 22, 1.4);
       }
@@ -863,6 +863,10 @@ function frame(now) {
   const over = G.state === 'over' ? 'block' : 'none';
   if (contBtn.style.display !== over) { contBtn.style.display = over; againBtn.style.display = over; }
   // the share button only appears on the game-over screen, a moment after it, so it can't be hit by accident while playing
+  if (G.state === 'over' && !G.shot && !G.shooting && now - G.overAt > 400) {
+    G.shooting = true; cv.toBlob(bl => { G.shot = bl; G.shooting = false; }, 'image/png');
+  }
+  if (G.state !== 'over') G.shot = null;
   const sh = G.state === 'over' && now - G.overAt > 800 ? 'block' : 'none';
   if (shareBtn.style.display !== sh) shareBtn.style.display = sh;
   requestAnimationFrame(frame);
@@ -916,34 +920,36 @@ function toast(msg) {
   t.textContent = msg; t.style.opacity = 1;
   clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.opacity = 0; }, 3500);
 }
-// share the final screen: mobile opens the share sheet with the image attached; PC copies/saves the image and opens the X compose window
+// share the final screen: the screenshot is taken when the game-over screen appears, so the click can hand it to the OS share sheet right away
+// (mobile: share sheet with the image attached; PC: image goes to the clipboard / is saved, then the X compose window opens)
+async function fallbackShare(blob, href) {
+  let copied = false;
+  try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); copied = true; } catch (e) {}
+  if (!copied) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'satisfying-breakout.png';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+  toast(copied ? '画像をコピーしました。投稿画面で貼り付けてください' : '画像を保存しました。投稿画面で添付してください');
+  window.open(href, '_blank', 'noopener');
+}
 shareBtn.addEventListener('click', async () => {
   const best = Math.max(G.best, G.score);
   const text = 'Satisfying Breakout で ' + G.score + '点（LV' + (G.level + 1) + '）！ベスト ' + best + '点 #SatisfyingBreakout';
   const url = location.origin + location.pathname;
   const href = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text) + '&url=' + encodeURIComponent(url);
-  let blob = null;
-  try { blob = await new Promise(res => cv.toBlob(res, 'image/png')); } catch (e) {}
-  if (blob) {
-    const file = new File([blob], 'satisfying-breakout.png', { type: 'image/png' });
-    try {
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], text, url });
-        return;
-      }
-    } catch (e) { if (e && e.name === 'AbortError') return; }
-    let copied = false;
-    try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); copied = true; } catch (e) {}
-    if (!copied) {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = 'satisfying-breakout.png';
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    }
-    toast(copied ? '画像をコピーしました。投稿画面で貼り付けてください' : '画像を保存しました。投稿画面で添付してください');
+  let blob = G.shot;
+  if (!blob) { try { blob = await new Promise(res => cv.toBlob(res, 'image/png')); } catch (e) {} }
+  if (!blob) { window.open(href, '_blank', 'noopener'); return; }
+  const file = new File([blob], 'satisfying-breakout.png', { type: 'image/png' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], text, url }).catch(e => { if (!e || e.name !== 'AbortError') fallbackShare(blob, href); });
+    return;
   }
-  window.open(href, '_blank', 'noopener');
+  fallbackShare(blob, href);
 });
+
 
 function toggleMute() {
   muted = !muted; muteBtn.textContent = muted ? '🔇' : '🔊';
