@@ -252,13 +252,13 @@ const SHAPES = [
 function corridor(g, segs, maskOnly) {
   const wall = new Uint8Array(g.length), mask = new Uint8Array(g.length);
   for (const sg of segs) {
-    const [ax, ay] = sg.a, [bx, by] = sg.b, dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+    const [ax, ay] = sg.a, [bx, by] = sg.b, dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy, hw = sg.hw || 2;
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
       const px = c + 0.5 - ax, py = r + 0.5 - ay;
       let t = (px * dx + py * dy) / L2;
       if (t < 0) { if (sg.oa) continue; t = 0; } else if (t > 1) { if (sg.ob) continue; t = 1; }
       const d = Math.hypot(px - t * dx, py - t * dy);
-      if (d <= 2) mask[r * COLS + c] = 1; else if (d <= 4) wall[r * COLS + c] = 1;
+      if (d <= hw) mask[r * COLS + c] = 1; else if (d <= hw + 2) wall[r * COLS + c] = 1;
     }
   }
   for (let i = 0; i < g.length; i++) {
@@ -298,6 +298,22 @@ function sanitize(g) {
   }
   for (let i = 0; i < g.length; i++) if ((g[i] === 1 || g[i] === 3) && !broken[i]) g[i] = 0;
 }
+function addObstacles(g) {
+  const kind = ['none', 'none', 'shelves', 'pillars', 'diag', 'frame', 'columns'][rint(0, 6)];
+  if (kind === 'none') return false;
+  const put = (c, r) => { if (c > 3 && c < COLS - 4 && r > 3 && r < ROWS - 12 && g[r * COLS + c] === 1) g[r * COLS + c] = 2; };
+  if (kind === 'shelves') for (let k = rint(2, 4); k--;) { const r = rint(8, 36), c0 = rint(6, 28), len = rint(10, 24); for (let i = 0; i < len; i++) { put(c0 + i, r); put(c0 + i, r + 1); } }
+  if (kind === 'pillars') for (let k = rint(5, 9); k--;) { const c0 = rint(6, 46), r0 = rint(6, 38); for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) put(c0 + a, r0 + b); }
+  if (kind === 'diag') for (let k = rint(2, 3); k--;) { const d = Math.random() < 0.5 ? -1 : 1, c0 = rint(12, 40), r0 = rint(6, 22), len = rint(12, 22); for (let i = 0; i < len; i++) { put(c0 + d * i, r0 + i); put(c0 + d * i + 1, r0 + i); } }
+  if (kind === 'frame') {
+    const c0 = rint(12, 18), c1 = rint(34, 40), r0 = rint(8, 12), r1 = rint(26, 32), gaps = [rint(0, 3), rint(0, 3)];
+    for (let c = c0; c <= c1; c++) { put(c, r0); put(c, r1); }
+    for (let r = r0; r <= r1; r++) { put(c0, r); put(c1, r); }
+    for (const gi of gaps) { const cc = rint(c0 + 3, c1 - 7), rr = rint(r0 + 3, r1 - 7); for (let i = 0; i < 5; i++) { if (gi === 0) g[r0 * COLS + cc + i] = g[r0 * COLS + cc + i] === 2 ? 1 : g[r0 * COLS + cc + i]; if (gi === 1) g[r1 * COLS + cc + i] = g[r1 * COLS + cc + i] === 2 ? 1 : g[r1 * COLS + cc + i]; if (gi === 2) g[(rr + i) * COLS + c0] = g[(rr + i) * COLS + c0] === 2 ? 1 : g[(rr + i) * COLS + c0]; if (gi === 3) g[(rr + i) * COLS + c1] = g[(rr + i) * COLS + c1] === 2 ? 1 : g[(rr + i) * COLS + c1]; } }
+  }
+  if (kind === 'columns') for (let k = rint(1, 2); k--;) { const c = rint(14, 40), r0 = rint(4, 12), len = rint(14, 28); for (let i = 0; i < len; i++) { put(c, r0 + i); put(c + 1, r0 + i); } }
+  return true;
+}
 // gold plug: swaps corridor-wall cells around (px,py) for yellow bricks, so breaking it opens a way into the brick area behind the wall
 function plug(g, px, py) {
   for (let r = Math.floor(py - 2); r <= Math.ceil(py + 2); r++) for (let c = Math.floor(px - 2); c <= Math.ceil(px + 2); c++) {
@@ -310,7 +326,38 @@ function ringRect(g, c0, r0, c1, r1) {   // hollow room: 1-thick walls, cleared 
     g[r * COLS + c] = (r === r0 || r === r1 || c === c0 || c === c1) ? 2 : 0;
   }
 }
+const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const MAZES = {
+  // ---- randomised entrance patterns ----
+  multi(g) {   // 1-4 straight channels at random places, widths and heights
+    const k = rint(1, 4), xs = [];
+    for (let t = 0; t < 60 && xs.length < k; t++) { const x = rint(9, 45); if (xs.every(q => Math.abs(q - x) >= 13)) xs.push(x); }
+    const segs = xs.map(x => ({ a: [x, 58], b: [x, rint(18, 46)], oa: true, ob: true, hw: Math.random() < 0.35 ? 3 : 2 }));
+    corridor(g, segs); return segs;
+  },
+  diagRand(g) {   // one diagonal channel, random lean / angle / position
+    const dir = Math.random() < 0.5 ? -1 : 1, dx = rint(7, 13), top = rint(26, 40);
+    const x0 = dir > 0 ? rint(10, 44 - dx) : rint(10 + dx, 44);
+    const segs = [{ a: [x0, 58], b: [x0 + dir * dx, top], oa: true, ob: true, hw: 3 }];
+    corridor(g, segs); return segs;
+  },
+  stubs(g) {   // a row of short holes in the floor
+    const k = rint(3, 5), gap = Math.floor(40 / k), x0 = rint(8, 12), segs = [];
+    for (let i = 0; i < k; i++) segs.push({ a: [x0 + i * gap + rint(0, 2), 58], b: [x0 + i * gap + 2, rint(46, 50)], oa: true, ob: true });
+    corridor(g, segs); return segs;
+  },
+  open(g) {   // a wide mouth in the floor
+    const segs = [{ a: [rint(18, 36), 58], b: [27, rint(40, 46)], oa: true, ob: true, hw: rint(6, 8) }];
+    segs[0].b[0] = segs[0].a[0]; corridor(g, segs); return segs;
+  },
+  bottle(g) {   // wide neck at the bottom, thin channel above
+    const x = rint(16, 38), segs = [{ a: [x, 58], b: [x, 49], oa: true, hw: 6 }, { a: [x, 49], b: [x, rint(18, 30)], ob: true }];
+    corridor(g, segs); return segs;
+  },
+  chamber(g) {   // channel with a round room in the middle
+    const x = rint(16, 38), segs = [{ a: [x, 58], b: [x, rint(12, 20)], oa: true, ob: true }, { a: [x, 37], b: [x, 31], hw: 7 }];
+    corridor(g, segs); return segs;
+  },
   mazeH(g) {
     const segs = [{ a: [19, 58], b: [19, 23], oa: true, ob: true }, { a: [36, 26], b: [36, 51] }, { a: [19, 36], b: [36, 36] }];
     corridor(g, segs); plug(g, 36, 23); plug(g, 33, 44); plug(g, 39, 44); return segs;
@@ -369,7 +416,7 @@ const MAZES = {
 const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwBase: 56,
-  order: [], drops: [], pal: null, assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
+  order: [], drops: [], pal: null, pal2: null, pat: 0, assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
   shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1, suction: true
 };
 window.__G = G; // handy for debugging
@@ -389,8 +436,10 @@ const PALETTES = [
 function drawCell(c, r, t) {
   const fy = r * C, fx = c * C;
   if (t === 1) {
-    fctx.fillStyle = G.pal.edge; fctx.fillRect(fx, fy, C, C);
-    fctx.fillStyle = G.pal.fill; fctx.fillRect(fx, fy, C - 1, C - 1);
+    const alt = (G.pat === 1 ? (r >> 2) & 1 : G.pat === 2 ? ((c >> 2) + (r >> 2)) & 1 : G.pat === 3 ? (c / 9 | 0) & 1 : 0);
+    const pl = alt ? G.pal2 : G.pal;
+    fctx.fillStyle = pl.edge; fctx.fillRect(fx, fy, C, C);
+    fctx.fillStyle = pl.fill; fctx.fillRect(fx, fy, C - 1, C - 1);
   } else if (t === 3) {
     fctx.fillStyle = '#a07800'; fctx.fillRect(fx, fy, C, C);
     fctx.fillStyle = '#ffd21a'; fctx.fillRect(fx, fy, C - 1, C - 1);
@@ -425,7 +474,7 @@ window.addEventListener('resize', resize);
 function buildLevel(n) {
   const g = G.grid;
   let T = G.tubes[n % G.tubes.length];
-  const shape = MAZES[T] ? () => true : SHAPES[G.order[n % SHAPES.length]];
+  const shape = T.startsWith('maze') ? () => true : SHAPES[G.order[n % SHAPES.length]];
   const prev = G.pal; do { G.pal = PALETTES[(Math.random() * PALETTES.length) | 0]; } while (G.pal === prev);
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     let t;
@@ -445,7 +494,7 @@ function buildLevel(n) {
   if (MAZES[T]) {
     const segs = MAZES[T](g);
     for (const sg of segs) {
-      if (sg.oa && sg.a[1] > ROWS) { G.aim.push(OX + sg.a[0] * C); G.assist.push({ x: OX + sg.a[0] * C, ax: 0 }); }
+      if (sg.oa && sg.a[1] > ROWS) { G.aim.push(OX + sg.a[0] * C); G.assist.push({ x: OX + sg.a[0] * C, ax: (sg.b[0] - sg.a[0]) / (sg.a[1] - sg.b[1]) }); }
       if (sg.ob) {
         const dx = sg.b[0] - sg.a[0], dy = sg.b[1] - sg.a[1], L = Math.hypot(dx, dy);
         G.cavs.push([sg.b[0] + dx / L * 3, sg.b[1] + dy / L * 3]);
@@ -460,13 +509,24 @@ function buildLevel(n) {
     }
     const w2 = (d.w || 4) / 2, topC = d.L0 + d.dir * Math.floor(Math.max(0, (d.base || 48) - d.top) / (d.step || 2)) + w2;
     G.aim.push(OX + (d.L0 + w2) * C);
-    G.assist.push({ x: OX + (d.L0 + w2) * C, ax: d.w ? d.dir / d.step : 0 });
+    G.assist.push({ x: OX + (d.L0 + w2) * C, ax: d.step ? d.dir / d.step : 0 });
     G.cavs.push([topC, d.top - 3]);
   }
   // cavity above each channel
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     if (g[r * COLS + c] === 1 && G.cavs.some(([cx, cy]) => (c + 0.5 - cx) ** 2 + (r + 0.5 - cy) ** 2 < 25)) g[r * COLS + c] = 0;
   }
+  // indestructible obstacles inside the field, a random mirror, and a brick colour pattern: so no two stages look alike
+  const snap = g.slice();
+  const obs = addObstacles(g);
+  sanitize(g);
+  { let cnt = 0; for (let i = 0; i < g.length; i++) if (g[i] === 1 || g[i] === 3) cnt++; if (cnt < 300 && obs) g.set(snap); }
+  if (Math.random() < 0.5) {
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS / 2; c++) { const i = r * COLS + c, j = r * COLS + (COLS - 1 - c); const t = g[i]; g[i] = g[j]; g[j] = t; }
+    G.aim = G.aim.map(x => W - x); G.cavs = G.cavs.map(([cx, cy]) => [COLS - cx, cy]); G.assist = G.assist.map(a => ({ x: W - a.x, ax: -a.ax }));
+  }
+  G.pal2 = PALETTES[(Math.random() * PALETTES.length) | 0];
+  G.pat = [0, 0, 1, 2, 3][(Math.random() * 5) | 0];
   sanitize(g);
   let b = 0; for (let i = 0; i < g.length; i++) if (g[i] === 1 || g[i] === 3) b++;
   G.bricks = b;
@@ -515,7 +575,7 @@ function newGame() {
   G.level = 0; G.score = 0; G.lives = 3; G.pwBase = 56; G.pierce = 0; G.pw = 56;
   G.parts.length = 0; G.texts.length = 0;
   G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
-  const kinds = ['center', 'twin', 'triple', 'diagL', 'diagR', 'vee', 'flare', 'mazeH', 'mazeM', 'mazeT', 'mazeD', 'mazeR', 'mazeLadder', 'mazeFish', 'mazePlus', 'mazeFork', 'mazeTree'];
+  const kinds = ['center', 'multi', 'multi', 'multi', 'diagRand', 'diagRand', 'vee', 'flare', 'stubs', 'open', 'bottle', 'chamber', 'mazeH', 'mazeM', 'mazeT', 'mazeD', 'mazeR', 'mazeLadder', 'mazeFish', 'mazePlus', 'mazeFork', 'mazeTree'];
   G.tubes = [];
   for (let i = 0; i < SHAPES.length; i++) {
     let k; do { k = kinds[(Math.random() * kinds.length) | 0]; } while (k === G.tubes[i - 1]);
