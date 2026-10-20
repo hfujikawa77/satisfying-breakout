@@ -250,8 +250,74 @@ const SHAPES = [
   px((x, y) => RC(x, y, .4, .15, .6, .98) || E(x, y, .5, .18, .1, .12) || RC(x, y, .16, .5, .4, .6) || RC(x, y, .16, .3, .27, .6) ||  // cactus
     RC(x, y, .6, .56, .84, .66) || RC(x, y, .73, .36, .84, .66)),
   px((x, y) => (T(x, y, .28, .5, .72, .5, .5, .99) || E(x, y, .5, .4, .27, .24) || E(x, y, .5, .22, .19, .17) || E(x, y, .5, .04, .05, .05)) &&  // ice cream
-    !(T(x, y, .4, .6, .45, .6, .42, .72) || T(x, y, .55, .6, .6, .6, .58, .72) || T(x, y, .46, .78, .54, .78, .5, .88)))
+    !(T(x, y, .4, .6, .45, .6, .42, .72) || T(x, y, .55, .6, .6, .6, .58, .72) || T(x, y, .46, .78, .54, .78, .5, .88))),
+  px((x, y) => E(x, y, .5, .36, .38, .34) || E(x, y, .3, .52, .22, .2) || E(x, y, .7, .52, .22, .2) || RC(x, y, .44, .55, .56, .98)),             // tree
+  px((x, y) => (T(x, y, .0, .96, .3, .25, .6, .96) || T(x, y, .38, .96, .68, .06, .99, .96)) && !(T(x, y, .59, .22, .68, .06, .77, .22) || T(x, y, .26, .4, .3, .25, .34, .4))), // mountains
+  px((x, y) => y < .92 && ((E(x, y, .5, .92, .47, .85) && !E(x, y, .5, .92, .38, .7)) || (E(x, y, .5, .92, .34, .62) && !E(x, y, .5, .92, .25, .46)) || (E(x, y, .5, .92, .21, .38) && !E(x, y, .5, .92, .12, .22)))), // rainbow
+  px((x, y) => T(x, y, .62, .02, .22, .54, .58, .54) || T(x, y, .42, .46, .78, .46, .38, .99)),                                                  // lightning
+  px((x, y) => (RC(x, y, .16, .42, .84, .98) || RC(x, y, .08, .2, .28, .98) || RC(x, y, .72, .2, .92, .98) || RC(x, y, .4, .1, .6, .98)) &&         // castle
+    !((y < .28 && y > .2 && (Math.floor(x * 25) % 2 === 0) && (x < .3 || x > .7)) || (y < .18 && y > .1 && (Math.floor(x * 25) % 2 === 0)) || E(x, y, .5, .98, .08, .22) || RC(x, y, .16, .5, .2, .6) || RC(x, y, .8, .5, .84, .6))),
+  px((x, y) => (E(x, y, .5, .62, .3, .22) || E(x, y, .14, .34, .1, .13) || E(x, y, .86, .34, .1, .13) || RC(x, y, .16, .4, .26, .6) || RC(x, y, .74, .4, .84, .6) ||   // crab
+    RC(x, y, .38, .3, .44, .42) || RC(x, y, .56, .3, .62, .42) || [0, 1, 2].some(k => RC(x, y, .22 + k * .04, .8, .26 + k * .04, .95)) || [0, 1, 2].some(k => RC(x, y, .66 + k * .04, .8, .7 + k * .04, .95))) &&
+    !(E(x, y, .41, .27, .03, .04) || E(x, y, .59, .27, .03, .04) || T(x, y, .08, .26, .14, .26, .1, .38) || T(x, y, .86, .26, .92, .26, .9, .38))),
+  px((x, y) => (E(x, y, .5, .36, .34, .32) && y < .55 || [0, 1, 2, 3, 4].some(k => RC(x, y, .2 + .14 * k, .5, .27 + .14 * k, .9 + (k % 2) * .08))) &&   // jellyfish
+    !(E(x, y, .38, .34, .04, .06) || E(x, y, .62, .34, .04, .06))),
+  px((x, y) => E(x, y, .5, .62, .14, .2) || E(x, y, .5, .36, .1, .12) || [0, 1, 2, 3].some(k => RC(x, y, .06 + k * .02, .28 + k * .15, .4, .31 + k * .15) || RC(x, y, .6, .28 + k * .15, .94 - k * .02, .31 + k * .15))), // spider
+  px((x, y) => T(x, y, .5, .03, .08, .5, .92, .5) || T(x, y, .5, .3, .15, .72, .85, .72) || RC(x, y, .44, .72, .56, .98))                          // pine tree
 ];
+
+// ---- procedural stages: a new random shape every time ----
+const fac = make => { const f = (u, v) => f.fn(u, v); f.init = () => { f.fn = make(); }; return f; };
+const R01 = () => Math.random();
+const GLYPHS = '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+SHAPES.push(
+  fac(() => {   // organic islands
+    const a = 3 + R01() * 4, b = 3 + R01() * 4, c = 3 + R01() * 4, d = 3 + R01() * 4, p = [R01() * 6.3, R01() * 6.3, R01() * 6.3, R01() * 6.3], t = -0.15 + R01() * 0.4;
+    return (u, v) => (Math.sin(u * a + p[0]) + Math.sin(v * b + p[1]) + Math.sin((u + v) * c + p[2]) + Math.sin((u - v) * d + p[3])) / 4 > t;
+  }),
+  fac(() => {   // skyline
+    const n = 6 + Math.floor(R01() * 6), h = Array.from({ length: n }, () => 0.2 + R01() * 0.6);
+    return (u, v) => { const i = Math.min(n - 1, Math.floor(u * n)), fu = u * n - i; return v < 0.8 && fu > 0.08 && fu < 0.92 && v > 0.8 - h[i]; };
+  }),
+  fac(() => {   // overlapping boxes
+    const k = 4 + Math.floor(R01() * 4), rs = Array.from({ length: k }, () => { const w = 0.15 + R01() * 0.3, h = 0.15 + R01() * 0.3; return [R01() * (1 - w), R01() * (0.8 - h), w, h]; });
+    return (u, v) => rs.some(([x, y, w, h]) => u > x && u < x + w && v > y && v < y + h);
+  }),
+  fac(() => {   // cracked slab
+    const k = 5 + Math.floor(R01() * 5), ls = Array.from({ length: k }, () => { const a = R01() * 3.14; return [R01(), R01() * 0.8, Math.cos(a), Math.sin(a)]; });
+    return (u, v) => v < 0.85 && !ls.some(([x, y, dx, dy]) => Math.abs((u - x) * dy - (v - y) * dx * 0.8) < 0.022);
+  }),
+  fac(() => {   // sunburst
+    const n = 6 + Math.floor(R01() * 8), ph = R01();
+    return (u, v) => { const x = u - 0.5, y = (v - 0.42) * 1.2, r = Math.hypot(x, y); return r < 0.5 && (((Math.atan2(y, x) / 6.283 * n + ph) % 1) + 1) % 1 < 0.55; };
+  }),
+  fac(() => {   // mosaic tiles
+    const n = 5 + Math.floor(R01() * 4), on = Array.from({ length: n * n }, () => R01() < 0.62);
+    return (u, v) => { if (v > 0.8) return false; const gx = u * n, gy = v / 0.8 * n, i = Math.min(n - 1, Math.floor(gx)), j = Math.min(n - 1, Math.floor(gy)); const fx = gx - i, fy = gy - j; return on[j * n + i] && fx > 0.1 && fx < 0.9 && fy > 0.1 && fy < 0.9; };
+  }),
+  fac(() => {   // scattered discs
+    const k = 9 + Math.floor(R01() * 9), ds = Array.from({ length: k }, () => [R01(), R01() * 0.8, 0.05 + R01() * 0.07]);
+    return (u, v) => ds.some(([x, y, r]) => (u - x) ** 2 + ((v - y) * 1.2) ** 2 < r * r);
+  }),
+  fac(() => {   // concentric rings of a random metric
+    const m = Math.floor(R01() * 3), k = 7 + Math.floor(R01() * 8), cx = 0.4 + R01() * 0.2, cy = 0.3 + R01() * 0.2;
+    return (u, v) => { const x = u - cx, y = (v - cy) * 1.2, n = m === 0 ? Math.abs(x) + Math.abs(y) : m === 1 ? Math.max(Math.abs(x), Math.abs(y)) : Math.hypot(x, y); return n < 0.62 && Math.floor(n * k) % 2 === 0; };
+  }),
+  ...[0, 1, 2].map(() => fac(() => {   // random symmetric critter
+    let bits, dens;
+    do { bits = Array.from({ length: 9 * 6 }, () => R01() < 0.58); dens = bits.filter(Boolean).length / bits.length; } while (dens < 0.42 || dens > 0.7);
+    return (u, v) => { if (v > 0.8) return false; const col = Math.min(10, Math.floor(u * 11)), row = Math.min(8, Math.floor(v / 0.8 * 9)), cc = col < 6 ? col : 10 - col; return bits[row * 6 + cc]; };
+  })),
+  ...[0, 1, 2, 3].map(() => fac(() => {   // a big letter or digit
+    const ch = GLYPHS[Math.floor(R01() * GLYPHS.length)], cv2 = document.createElement('canvas'), W2 = 50, H2 = 42;
+    cv2.width = W2; cv2.height = H2;
+    const c2 = cv2.getContext('2d', { willReadFrequently: true });
+    c2.fillStyle = '#000'; c2.font = 'bold 54px Arial, Helvetica, sans-serif'; c2.textAlign = 'center'; c2.textBaseline = 'middle';
+    c2.fillText(ch, W2 / 2, H2 / 2 + 3);
+    const d = c2.getImageData(0, 0, W2, H2).data;
+    return (u, v) => { if (v > 0.8) return false; const x = Math.min(W2 - 1, Math.floor(u * W2)), y = Math.min(H2 - 1, Math.floor(v / 0.8 * H2)); return d[(y * W2 + x) * 4 + 3] > 110; };
+  }))
+);
 
 // ---------- maze stages (inspired by the reference clips) ----------
 // corridor: segments {a:[x,y], b:[x,y], oa, ob}; x/y are cell-edge coords, gap is 4 cells wide, walls 2 thick.
@@ -482,6 +548,7 @@ function buildLevel(n) {
   const g = G.grid;
   let T = G.tubes[n % G.tubes.length];
   const shape = T.startsWith('maze') ? () => true : SHAPES[G.order[n % SHAPES.length]];
+  if (shape.init) shape.init();
   const prev = G.pal; do { G.pal = PALETTES[(Math.random() * PALETTES.length) | 0]; } while (G.pal === prev);
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
     let t;
