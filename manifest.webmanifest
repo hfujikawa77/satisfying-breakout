@@ -1,0 +1,17 @@
+{
+  "name": "Satisfying Breakout",
+  "short_name": "Breakout",
+  "description": "ピクセルブロックを崩す、気持ちいいブロック崩し",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0d0d",
+  "theme_color": "#161616",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
