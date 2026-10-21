@@ -1,6 +1,6 @@
 // Offline support: cache the whole game on first visit; afterwards it starts without a network.
 // Strategy: serve from cache, refresh the cache in the background (so updates arrive on the next launch).
-const CACHE = 'satisfying-breakout-v1';
+const CACHE = 'satisfying-breakout-v2';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
