@@ -18,10 +18,11 @@ body{display:flex;align-items:center;justify-content:center}
 canvas{display:block;touch-action:none}
 #suck{position:absolute;left:10px;bottom:10px;height:34px;border-radius:17px;border:0;background:#262626;color:#fff;font:12px/34px system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;padding:0 12px;cursor:pointer;opacity:.85}
 #suck.off{color:#888}
-#share{position:absolute;left:50%;transform:translateX(-50%);top:64%;display:none;height:34px;border-radius:17px;border:0;background:#1d9bf0;color:#fff;font:bold 13px/34px system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;padding:0 18px;cursor:pointer}
-#cont,#again{position:absolute;left:50%;transform:translateX(-50%);display:none;width:62%;height:38px;border-radius:19px;border:0;font:bold 14px/38px system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;cursor:pointer;color:#fff}
-#cont{top:43%;background:#ff6b4a}
-#again{top:52%;background:#3a3a3a}
+#share{position:absolute;left:50%;transform:translateX(-50%);top:67.5%;display:none;height:34px;border-radius:17px;border:0;background:#1d9bf0;color:#fff;font:bold 13px/34px system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;padding:0 18px;cursor:pointer}
+#cont,#next,#again{position:absolute;left:50%;transform:translateX(-50%);display:none;width:62%;height:38px;border-radius:19px;border:0;font:bold 14px/38px system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;cursor:pointer;color:#fff}
+#cont{top:41%;background:#ff6b4a}
+#next{top:49.5%;background:#2f7fd8}
+#again{top:58%;background:#3a3a3a}
 #toast{position:absolute;left:50%;transform:translateX(-50%);bottom:64px;max-width:86%;background:rgba(0,0,0,.85);color:#fff;font:12px/1.5 system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;padding:8px 14px;border-radius:12px;text-align:center;opacity:0;transition:opacity .3s;pointer-events:none}
 #mute{position:absolute;right:10px;bottom:10px;width:34px;height:34px;border-radius:50%;border:0;background:#262626;color:#fff;font-size:16px;line-height:34px;padding:0;cursor:pointer;opacity:.85}
 </style>
@@ -32,6 +33,7 @@ canvas{display:block;touch-action:none}
   <button id="suck" title="吸引 (F)">🧲 吸引 ON</button>
   <button id="share" title="Xに投稿">𝕏 に投稿</button>
   <button id="cont">▶ コンティニュー</button>
+  <button id="next">⏭ 次のステージへ</button>
   <button id="again">最初から</button>
   <div id="toast"></div>
   <button id="mute" title="Sound (M)">🔊</button>
@@ -60,6 +62,7 @@ const suckBtn = document.getElementById('suck');
 const shareBtn = document.getElementById('share');
 const contBtn = document.getElementById('cont');
 const againBtn = document.getElementById('again');
+const nextBtn = document.getElementById('next');
 const field = document.createElement('canvas');
 const fctx = field.getContext('2d');
 let scale = 1;
@@ -983,7 +986,7 @@ function draw(now) {
     ctx.fillText('ボールは通路から上へ / 落ちるアイテムをパドルで拾おう', W / 2, 412);
   }
   if (G.state === 'over') {
-    ctx.fillStyle = 'rgba(0,0,0,.78)'; ctx.fillRect(0, 130, W, 170);
+    ctx.fillStyle = 'rgba(0,0,0,.78)'; ctx.fillRect(0, 130, W, 215);
     ctx.fillStyle = '#fff'; ctx.font = 'bold 26px ' + FONT; ctx.fillText('GAME OVER', W / 2, 160);
     ctx.font = '13px ' + FONT; ctx.fillText('SCORE ' + G.score + '   BEST ' + G.best, W / 2, 190);
   }
@@ -995,7 +998,7 @@ function frame(now) {
   const dt = Math.min(1 / 30, (now - last) / 1000); last = now;
   update(dt); draw(now);
   const over = G.state === 'over' ? 'block' : 'none';
-  if (contBtn.style.display !== over) { contBtn.style.display = over; againBtn.style.display = over; }
+  if (contBtn.style.display !== over) { contBtn.style.display = over; nextBtn.style.display = over; againBtn.style.display = over; }
   // the share button only appears on the game-over screen, a moment after it, so it can't be hit by accident while playing
   if (G.state === 'over' && !G.shot && !G.shooting && now - G.overAt > 400) {
     G.shooting = true; cv.toBlob(bl => { G.shot = bl; G.shooting = false; }, 'image/png');
@@ -1040,6 +1043,14 @@ function continueGame() {
   resetBall();
   addText(W / 2, OY + 110, 'CONTINUE', '#fff', 20, 1.2);
 }
+// skip ahead: give up on this stage and start the next one with fresh lives (score is kept)
+function nextStage() {
+  if (G.state !== 'over') return;
+  G.level++; G.lives = 3; G.pwBase = 56; G.pierce = 0; G.drops = [];
+  buildLevel(G.level); resetBall();
+  addText(W / 2, OY + 100, 'LEVEL ' + (G.level + 1), '#fff', 22, 1.4);
+}
+nextBtn.addEventListener('pointerdown', e => { e.stopPropagation(); initAudio(); nextStage(); });
 contBtn.addEventListener('pointerdown', e => { e.stopPropagation(); initAudio(); continueGame(); });
 againBtn.addEventListener('pointerdown', e => { e.stopPropagation(); initAudio(); if (G.state === 'over') newGame(); });
 function setSuction(on) {
