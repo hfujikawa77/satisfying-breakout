@@ -50,6 +50,7 @@ canvas{display:block;touch-action:none}
 (() => {
 'use strict';
 // ---------- constants ----------
+const VERSION = '2026-10-21 a';
 const W = 270, H = 500;           // logical size
 const C = 5, COLS = 54, ROWS = 56; // 5px cells
 const OX = 0, OY = 22;             // field origin
@@ -986,6 +987,7 @@ function draw(now) {
   ctx.globalAlpha = 1;
   ctx.restore();
 
+  ctx.fillStyle = 'rgba(255,255,255,.28)'; ctx.font = '8px ' + FONT; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic'; ctx.fillText('v' + VERSION, W - 4, H - 2);
   // overlays
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   if (G.state === 'ready' && G.hint) {
@@ -1120,7 +1122,11 @@ muteBtn.addEventListener('pointerdown', e => { e.stopPropagation(); initAudio();
 
 // offline play: the service worker caches the game after the first visit
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {   // a newer version took over: reload once (never in the middle of a round)
+    if (hadController && !window.__swReloaded && G.state !== 'play') { window.__swReloaded = true; location.reload(); }
+  });
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').then(reg => reg.update()).catch(() => {}); });
 }
 resize();
 newGame();
