@@ -52,7 +52,7 @@ canvas{display:block;touch-action:none}
 (() => {
 'use strict';
 // ---------- constants ----------
-const VERSION = '2026-10-22 c';
+const VERSION = '2026-10-22 e';
 const W = 270, H = 500;           // logical size
 const C = 5, COLS = 54, ROWS = 56; // 5px cells
 const OX = 0, OY = 22;             // field origin
@@ -390,7 +390,7 @@ function sanitize(g) {
   };
   for (let c = 0; c < COLS; c++) if (g[(ROWS - 1) * COLS + c] === 0) { seen[(ROWS - 1) * COLS + c] = 1; st.push((ROWS - 1) * COLS + c); }
   closure();
-  // brick pockets sealed off by walls get a yellow plug through the wall, so they can still be reached
+  // brick pockets sealed off by walls get a gap opened through the wall, so they can always be reached
   const border = i => { const c = i % COLS, r = (i / COLS) | 0; return c < 2 || c >= COLS - 2 || r < 2 || r >= ROWS - 2; };
   const nb = i => { const c = i % COLS, r = (i / COLS) | 0, o = []; for (const [dc, dr] of N4) { const x = c + dc, y = r + dr; if (x >= 0 && y >= 0 && x < COLS && y < ROWS) o.push(y * COLS + x); } return o; };
   for (let pass = 0; pass < 10; pass++) {
@@ -406,7 +406,16 @@ function sanitize(g) {
       for (const j of nb(i)) if (g[j] === 2 && !border(j) && par[j] === -2) { par[j] = i; dist[j] = dist[i] + 1; q.push(j); }
     }
     if (found < 0) break;
-    for (let i = found; i >= 0; i = par[i]) g[i] = 3;
+    // open a wide gap (about 7 cells) through the wall, so the ball can easily get in
+    const opened = [];
+    for (let i = found; i >= 0; i = par[i]) {
+      const c = i % COLS, r = (i / COLS) | 0;
+      for (let dr = -3; dr <= 3; dr++) for (let dc = -3; dc <= 3; dc++) {
+        const x = c + dc, y = r + dr, j = y * COLS + x;
+        if (x >= 0 && y >= 0 && x < COLS && y < ROWS && g[j] === 2 && !border(j)) { g[j] = 0; opened.push(j); }
+      }
+    }
+    for (const j of opened) if (nb(j).some(k => seen[k])) { seen[j] = 1; st.push(j); }
     closure();
   }
   for (let i = 0; i < g.length; i++) if (isBrick(g[i]) && !broken[i]) g[i] = 0;
@@ -484,7 +493,15 @@ const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 // chain of corridor segments through the points; ext = add a long straight tail so an open end really opens
 const ch = (pts, o = {}) => {
   const P = pts.map(p => p.slice());
-  if (o.ext) { const [x1, y1] = P[P.length - 1], [x0, y0] = P[P.length - 2], L = Math.hypot(x1 - x0, y1 - y0) || 1; P.push([x1 + (x1 - x0) / L * 9, y1 + (y1 - y0) / L * 9]); }
+  if (o.ext) {   // long straight tail, but never past the outer wall
+    const [x1, y1] = P[P.length - 1], [x0, y0] = P[P.length - 2], L = Math.hypot(x1 - x0, y1 - y0) || 1, ux = (x1 - x0) / L, uy = (y1 - y0) / L;
+    let len = 9;
+    if (uy < 0) len = Math.min(len, (y1 - 7) / -uy);
+    if (uy > 0) len = Math.min(len, (49 - y1) / uy);
+    if (ux > 0) len = Math.min(len, (48 - x1) / ux);
+    if (ux < 0) len = Math.min(len, (x1 - 5) / -ux);
+    if (len > 2) P.push([x1 + ux * len, y1 + uy * len]);
+  }
   return P.slice(0, -1).map((p, i) => ({ a: p, b: P[i + 1], oa: !!o.oa && i === 0, ob: !!o.ob && i === P.length - 2, hw: o.hw || 2 }));
 };
 const go = (g, ...chains) => { const segs = chains.flat(); corridor(g, segs); return segs; };
@@ -749,6 +766,10 @@ function buildLevel(n) {
     G.aim.push(OX + (d.L0 + w2) * C);
     G.assist.push({ x: OX + (d.L0 + w2) * C, ax: d.step ? d.dir / d.step : 0 });
     G.cavs.push([topC, d.top - 3]);
+  }
+  // channels must never cut through the outer wall (except the entrances in the floor): restore the top and the sides
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (r < 2 || c < 2 || c >= COLS - 2) g[r * COLS + c] = 2;
   }
   // cavity above each channel
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
