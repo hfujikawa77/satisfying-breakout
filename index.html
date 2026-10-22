@@ -18,7 +18,8 @@ body{display:flex;align-items:center;justify-content:center}
 canvas{display:block;touch-action:none}
 #stage{position:relative}
 #bar{display:flex;gap:8px;justify-content:space-between;align-items:center;height:38px;padding:0 8px;background:#202020}
-#bar button{height:28px;border-radius:14px;border:0;background:#333;color:#fff;font:12px/28px system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;padding:0 12px;cursor:pointer}
+#bar button{height:28px;border-radius:14px;border:0;background:#333;color:#fff;font:12px/28px system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;padding:0 10px;cursor:pointer}
+#bar #pause{width:40px;padding:0;font-size:14px}
 #bar button.armed{background:#d8742b}
 #bar #mute{width:34px;padding:0;font-size:15px}
 #suck.off{color:#999}
@@ -34,6 +35,7 @@ canvas{display:block;touch-action:none}
 <div id="wrap">
   <div id="bar">
     <button id="suck" title="吸引 (F)">🧲 吸引 ON</button>
+    <button id="pause" title="一時停止 (P)">⏸</button>
     <button id="skip" title="次のステージへ">⏭ 次の面</button>
     <button id="mute" title="Sound (M)">🔊</button>
   </div>
@@ -50,7 +52,7 @@ canvas{display:block;touch-action:none}
 (() => {
 'use strict';
 // ---------- constants ----------
-const VERSION = '2026-10-22 a';
+const VERSION = '2026-10-22 b';
 const W = 270, H = 500;           // logical size
 const C = 5, COLS = 54, ROWS = 56; // 5px cells
 const OX = 0, OY = 22;             // field origin
@@ -73,6 +75,7 @@ const contBtn = document.getElementById('cont');
 const againBtn = document.getElementById('again');
 const nextBtn = document.getElementById('next');
 const skipBtn = document.getElementById('skip');
+const pauseBtn = document.getElementById('pause');
 const field = document.createElement('canvas');
 const fctx = field.getContext('2d');
 let scale = 1;
@@ -354,11 +357,13 @@ function corridor(g, segs, maskOnly) {
 }
 // remove bricks the ball can never touch (sealed off by indestructible walls), so every stage is clearable
 function sanitize(g) {
-  const seen = new Uint8Array(g.length), st = [];
+  const seen = new Uint8Array(g.length), st = [], broken = new Uint8Array(g.length);
+  const isBrick = v => v === 1 || v === 3 || v === 4;
+  const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   const flood = () => {
     while (st.length) {
       const i = st.pop(), c = i % COLS, r = (i / COLS) | 0;
-      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      for (const [dc, dr] of N4) {
         const x = c + dc, y = r + dr;
         if (x < 0 || y < 0 || x >= COLS || y >= ROWS) continue;
         const j = y * COLS + x;
@@ -366,24 +371,45 @@ function sanitize(g) {
       }
     }
   };
-  for (let c = 0; c < COLS; c++) if (g[(ROWS - 1) * COLS + c] === 0) { seen[(ROWS - 1) * COLS + c] = 1; st.push((ROWS - 1) * COLS + c); }
-  flood();
-  const broken = new Uint8Array(g.length);
-  for (let changed = true; changed;) {
-    changed = false;
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      const i = r * COLS + c;
-      if ((g[i] !== 1 && g[i] !== 3 && g[i] !== 4) || broken[i]) continue;
-      let touch = false;
-      for (let dr = -1; dr <= 1 && !touch; dr++) for (let dc = -1; dc <= 1; dc++) {
-        const x = c + dc, y = r + dr;
-        if (x >= 0 && y >= 0 && x < COLS && y < ROWS && seen[y * COLS + x]) { touch = true; break; }
-      }
-      if (touch) { broken[i] = 1; seen[i] = 1; st.push(i); changed = true; }
-    }
+  const closure = () => {
     flood();
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+        const i = r * COLS + c;
+        if (!isBrick(g[i]) || broken[i]) continue;
+        let touch = false;
+        for (let dr = -1; dr <= 1 && !touch; dr++) for (let dc = -1; dc <= 1; dc++) {
+          const x = c + dc, y = r + dr;
+          if (x >= 0 && y >= 0 && x < COLS && y < ROWS && seen[y * COLS + x]) { touch = true; break; }
+        }
+        if (touch) { broken[i] = 1; seen[i] = 1; st.push(i); changed = true; }
+      }
+      flood();
+    }
+  };
+  for (let c = 0; c < COLS; c++) if (g[(ROWS - 1) * COLS + c] === 0) { seen[(ROWS - 1) * COLS + c] = 1; st.push((ROWS - 1) * COLS + c); }
+  closure();
+  // brick pockets sealed off by walls get a yellow plug through the wall, so they can still be reached
+  const border = i => { const c = i % COLS, r = (i / COLS) | 0; return c < 2 || c >= COLS - 2 || r < 2 || r >= ROWS - 2; };
+  const nb = i => { const c = i % COLS, r = (i / COLS) | 0, o = []; for (const [dc, dr] of N4) { const x = c + dc, y = r + dr; if (x >= 0 && y >= 0 && x < COLS && y < ROWS) o.push(y * COLS + x); } return o; };
+  for (let pass = 0; pass < 10; pass++) {
+    let un = 0; for (let i = 0; i < g.length; i++) if (isBrick(g[i]) && !broken[i]) un++;
+    if (un < 25) break;
+    const par = new Int32Array(g.length).fill(-2), dist = new Uint8Array(g.length), q = [];
+    for (let i = 0; i < g.length; i++) if (g[i] === 2 && !border(i) && nb(i).some(j => seen[j])) { par[i] = -1; dist[i] = 1; q.push(i); }
+    let found = -1;
+    for (let qi = 0; qi < q.length; qi++) {
+      const i = q[qi];
+      if (nb(i).some(j => isBrick(g[j]) && !broken[j])) { found = i; break; }
+      if (dist[i] >= 4) continue;
+      for (const j of nb(i)) if (g[j] === 2 && !border(j) && par[j] === -2) { par[j] = i; dist[j] = dist[i] + 1; q.push(j); }
+    }
+    if (found < 0) break;
+    for (let i = found; i >= 0; i = par[i]) g[i] = 3;
+    closure();
   }
-  for (let i = 0; i < g.length; i++) if ((g[i] === 1 || g[i] === 3 || g[i] === 4) && !broken[i]) g[i] = 0;
+  for (let i = 0; i < g.length; i++) if (isBrick(g[i]) && !broken[i]) g[i] = 0;
 }
 // stage gimmicks: round bumpers, shuttling bars, and two-hit bricks
 function addGimmicks(g) {
@@ -450,6 +476,14 @@ function ringRect(g, c0, r0, c1, r1) {   // hollow room: 1-thick walls, cleared 
   }
 }
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+// chain of corridor segments through the points; ext = add a long straight tail so an open end really opens
+const ch = (pts, o = {}) => {
+  const P = pts.map(p => p.slice());
+  if (o.ext) { const [x1, y1] = P[P.length - 1], [x0, y0] = P[P.length - 2], L = Math.hypot(x1 - x0, y1 - y0) || 1; P.push([x1 + (x1 - x0) / L * 9, y1 + (y1 - y0) / L * 9]); }
+  return P.slice(0, -1).map((p, i) => ({ a: p, b: P[i + 1], oa: !!o.oa && i === 0, ob: !!o.ob && i === P.length - 2, hw: o.hw || 2 }));
+};
+const go = (g, ...chains) => { const segs = chains.flat(); corridor(g, segs); return segs; };
+const arcPts = (cx, cy, r, a0, a1, n) => Array.from({ length: n + 1 }, (_, i) => { const a = a0 + (a1 - a0) * i / n; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; });
 const MAZES = {
   // ---- randomised entrance patterns ----
   multi(g) {   // 1-4 straight channels at random places, widths and heights
@@ -464,6 +498,55 @@ const MAZES = {
     const segs = [{ a: [x0, 58], b: [x0 + dir * dx, top], oa: true, ob: true, hw: 3 }];
     corridor(g, segs); return segs;
   },
+  // ---- generated channel patterns ----
+  zigzag(g) { const cx = rint(16, 38), d = rint(4, 6), pts = [[cx, 58], [cx, 50]]; for (let i = 0; i < 5; i++) pts.push([cx + (i % 2 ? -d : d), 50 - 8 * (i + 1)]); return go(g, ch(pts, { oa: 1, ob: 1, ext: 1, hw: 3 })); },
+  ring(g) { const cx = rint(20, 34); return go(g, ch([[cx, 58], [cx, 46]], { oa: 1, hw: 3 }), ch(arcPts(cx, 34, 12, Math.PI / 2, Math.PI * 2.5, 22), { hw: 3 }), ch([[cx, 24], [cx, 8]], { ob: 1, ext: 1, hw: 3 })); },
+  trident(g) { return go(g, ch([[27, 58], [27, 36]], { oa: 1 }), ch([[27, 36], [14, 28], [14, 12]], { ob: 1, ext: 1 }), ch([[27, 36], [27, 12]], { ob: 1, ext: 1 }), ch([[27, 36], [40, 28], [40, 12]], { ob: 1, ext: 1 })); },
+  starHub(g) {
+    const ch2 = [ch([[27, 58], [27, 38]], { oa: 1 })];
+    for (const a of [-70, -35, 0, 35, 70]) { const r = a * Math.PI / 180; ch2.push(ch([[27, 38], [27 + 22 * Math.sin(r), 38 - 22 * Math.cos(r)]], { ob: 1, ext: 1 })); }
+    for (const a of [-115, 115]) { const r = a * Math.PI / 180; ch2.push(ch([[27, 38], [27 + 12 * Math.sin(r), 38 - 12 * Math.cos(r)]])); }
+    return go(g, ...ch2);
+  },
+  rake(g) { const c2 = [ch([[27, 58], [27, 42]], { oa: 1 }), ch([[9, 42], [45, 42]])]; for (const x of [9, 18, 27, 36, 45]) c2.push(ch([[x, 42], [x, 16]], { ob: 1, ext: 1 })); return go(g, ...c2); },
+  portal(g) {
+    const segs = [ch([[27, 58], [27, 46]], { oa: 1 }), ...[17, 27, 37].map(x => ch([[x, 38], [x, 14]], { ob: 1, ext: 1 }))].flat();
+    corridor(g, segs); ringRect(g, 12, 36, 42, 52); corridor(g, segs, true); return segs;
+  },
+  fan(g) { const x = rint(20, 34), c2 = [ch([[x, 58], [x, 40]], { oa: 1 })]; for (const a of [-55, -28, 0, 28, 55]) { const r = a * Math.PI / 180; c2.push(ch([[x, 40], [x + 22 * Math.sin(r), 40 - 22 * Math.cos(r)]], { ob: 1, ext: 1 })); } return go(g, ...c2); },
+  bridge(g) { return go(g, ch([[14, 58], [14, 28]], { oa: 1 }), ch([[40, 58], [40, 28]], { oa: 1 }), ch([[14, 28], [27, 18], [40, 28]]), ch([[27, 18], [27, 6]], { ob: 1, ext: 1 })); },
+  cage(g) { return go(g, ch([[27, 58], [27, 46]], { oa: 1 }), ch([[27, 46], [14, 46], [14, 24], [40, 24], [40, 46], [27, 46]]), ch([[14, 24], [8, 12]], { ob: 1, ext: 1 }), ch([[40, 24], [46, 12]], { ob: 1, ext: 1 })); },
+  diamondRing(g) { return go(g, ch([[27, 58], [27, 47]], { oa: 1 }), ch([[27, 47], [41, 35], [27, 23], [13, 35], [27, 47]], { hw: 3 }), ch([[27, 23], [27, 8]], { ob: 1, ext: 1 })); },
+  tripleDiag(g) { const dir = Math.random() < 0.5 ? 1 : -1, c2 = []; for (const x of dir > 0 ? [8, 22, 36] : [20, 34, 46]) c2.push(ch([[x, 58], [x + dir * 8, 28]], { oa: 1, ob: 1, ext: 1, hw: 2 })); return go(g, ...c2); },
+  beads(g) { const x = rint(18, 36); return go(g, ch([[x, 58], [x, 8]], { oa: 1, ob: 1, ext: 1 }), ch([[x, 45], [x, 43]], { hw: 6 }), ch([[x, 33], [x, 31]], { hw: 6 }), ch([[x, 21], [x, 19]], { hw: 6 })); },
+  teeth(g) { const x = rint(20, 34), c2 = [ch([[x, 58], [x, 8]], { oa: 1, ob: 1, ext: 1 })]; [46, 38, 30, 22, 14].forEach((y, i) => c2.push(ch([[x, y], [x + (i % 2 ? -9 : 9), y]]))); return go(g, ...c2); },
+  needle(g) { const k = rint(1, 3), xs = []; for (let t = 0; t < 60 && xs.length < k; t++) { const x = rint(8, 46); if (xs.every(q => Math.abs(q - x) >= 12)) xs.push(x); } return go(g, ...xs.map(x => ch([[x, 58], [x, rint(14, 40)]], { oa: 1, ob: 1, ext: 1, hw: 1 }))); },
+  canyon(g) { const x = rint(16, 38); return go(g, ch([[x, 58], [x, rint(10, 24)]], { oa: 1, ob: 1, ext: 1, hw: 5 })); },
+  sigmoid(g) { const x0 = rint(10, 20), x1 = x0 + rint(6, 10), top = rint(10, 22), pts = []; for (let i = 0; i <= 14; i++) { const t = i / 14, sm = t * t * (3 - 2 * t); pts.push([(Math.random() < 2 ? x0 : x0) + (x1 - x0) * sm, 58 - (58 - top) * t]); } return go(g, ch(pts, { oa: 1, ob: 1, ext: 1, hw: 3 })); },
+  hook(g) { const x = rint(12, 22), pts = [[x, 58], [x, 30]].concat(arcPts(x + 9, 30, 9, Math.PI, Math.PI * 2, 10), [[x + 18, 30], [x + 18, 44]]); return go(g, ch(pts, { oa: 1, ob: 1, ext: 1, hw: 2 })); },
+  meander(g) { let x = rint(18, 36); const pts = [[x, 58], [x, 52]]; for (let y = 46; y >= 14; y -= 6) { x = Math.max(10, Math.min(44, x + rint(-7, 7))); pts.push([x, y]); } return go(g, ch(pts, { oa: 1, ob: 1, ext: 1, hw: 3 })); },
+  randTree(g) {
+    const x = rint(20, 34), c2 = [ch([[x, 58], [x, 14]], { oa: 1, ob: 1, ext: 1 })];
+    for (let k = rint(3, 6); k--;) { const y = rint(18, 46), dir = Math.random() < 0.5 ? -1 : 1, len = rint(8, 16), up = rint(0, 10); c2.push(ch([[x, y], [Math.max(8, Math.min(46, x + dir * len)), y - up]])); }
+    return go(g, ...c2);
+  },
+  randRooms(g) { const x = rint(18, 36), c2 = [ch([[x, 58], [x, 8]], { oa: 1, ob: 1, ext: 1 })]; for (let k = rint(2, 4); k--;) { const y = rint(16, 46), dx = rint(-6, 6); c2.push(ch([[x + dx, y], [x + dx, y - 2]], { hw: rint(5, 8) })); } return go(g, ...c2); },
+  doubleWave(g) { const c2 = []; for (const [cx, ph] of [[17, 0], [37, Math.PI]]) { const pts = []; for (let y = 58; y >= 22; y -= 2) pts.push([cx + 5 * Math.cos(0.1 * (58 - y) + ph), y]); c2.push(ch(pts, { oa: 1, ob: 1, ext: 1, hw: 3 })); } return go(g, ...c2); },
+  tbar(g) { return go(g, ch([[27, 58], [27, 36]], { oa: 1 }), ch([[9, 36], [45, 36]]), ch([[9, 36], [9, 10]], { ob: 1, ext: 1 }), ch([[45, 36], [45, 10]], { ob: 1, ext: 1 })); },
+  gates(g) { const x = rint(18, 36), segs = go(g, ch([[x, 58], [x, 10]], { oa: 1, ob: 1, ext: 1, hw: 3 })); for (const y of [46, 36, 26]) for (let r = y; r < y + 2; r++) for (let c = x - 3; c < x + 3; c++) if (g[r * COLS + c] === 0) g[r * COLS + c] = 3; return segs; },
+  yy(g) { const x = rint(22, 32); return go(g, ch([[x, 58], [x, 38]], { oa: 1 }), ch([[x, 38], [x - 12, 28], [x - 12, 16]], { ob: 1, ext: 1 }), ch([[x, 38], [x + 12, 28], [x + 12, rint(8, 22)]], { ob: 1, ext: 1 })); },
+  crown(g) { const x = rint(22, 32), c2 = [ch([[x, 58], [x, 30]], { oa: 1 })]; for (const dx of [-16, -8, 0, 8, 16]) c2.push(ch([[x, 30], [x + dx, 30 - 18 + Math.abs(dx) * 0.5]], { ob: 1, ext: 1 })); return go(g, ...c2); },
+  arch(g) { const pts = [[10, 58], [10, 36]].concat(arcPts(26, 36, 16, Math.PI, Math.PI * 2, 14), [[42, 36], [42, 44]]); return go(g, ch(pts, { oa: 1, ob: 1, ext: 1, hw: 3 })); },
+  ring2(g) { const cx = rint(20, 34); return go(g, ch([[cx, 58], [cx, 50]], { oa: 1, hw: 3 }), ch(arcPts(cx, 41, 9, Math.PI / 2, Math.PI * 2.5, 18), { hw: 3 }), ch(arcPts(cx, 22, 9, Math.PI / 2, Math.PI * 2.5, 18), { hw: 3 }), ch([[cx, 13], [cx, 4]], { ob: 1, ext: 1, hw: 3 })); },
+  zigzagWide(g) { const cx = rint(18, 34), d = rint(9, 12), pts = [[cx, 58], [cx, 52]]; for (let i = 0; i < 3; i++) pts.push([cx + (i % 2 ? -d : d), 52 - 12 * (i + 1)]); return go(g, ch(pts, { oa: 1, ob: 1, ext: 1, hw: 3 })); },
+  plusRoom(g) { const x = rint(22, 32), segs = go(g, ch([[x, 58], [x, 8]], { oa: 1, ob: 1, ext: 1 }), ch([[x - 12, 32], [x + 12, 32]], { hw: 4 }), ch([[x, 44], [x, 20]], { hw: 6 })); return segs; },
+  steps(g) { const x = rint(8, 14); return go(g, ch([[x, 58], [x, 52], [x + 10, 46], [x + 10, 38], [x + 20, 32], [x + 20, 24], [x + 30, 18]], { oa: 1, ob: 1, ext: 1, hw: 3 })); },
+  keyhole(g) { const x = rint(20, 34), segs = [ch([[x, 58], [x, 40]], { oa: 1 }), ch([[x, 32], [x, 30]], { hw: 9 }), ...[-9, 0, 9].map(dx => ch([[x + dx, 24], [x + dx, 6]], { ob: 1, ext: 1 }))].flat(); corridor(g, segs); return segs; },
+  fir(g) { const c2 = [ch([[27, 58], [27, 8]], { oa: 1, ob: 1, ext: 1 })]; [44, 34, 24].forEach((y, i) => { const w = 16 - i * 3; c2.push(ch([[27, y], [27 - w, y - 8]]), ch([[27, y], [27 + w, y - 8]])); }); return go(g, ...c2); },
+  palm(g) { const x = rint(18, 36), pts = [[x, 58]]; for (let y = 52; y >= 34; y -= 3) pts.push([x + 4 * Math.sin((58 - y) * 0.2), y]); const [tx, ty] = pts[pts.length - 1], c2 = [ch(pts, { oa: 1 })]; for (const a of [-60, -30, 0, 30, 60]) { const r = a * Math.PI / 180; c2.push(ch([[tx, ty], [tx + 20 * Math.sin(r), ty - 20 * Math.cos(r)]], { ob: 1, ext: 1 })); } return go(g, ...c2); },
+  antenna(g) { const x = rint(20, 34); return go(g, ch([[x, 58], [x, 30]], { oa: 1, hw: 1 }), ch([[x, 26], [x, 22]], { hw: 8 }), ch([[x - 5, 16], [x - 5, 6]], { ob: 1, ext: 1 }), ch([[x + 5, 16], [x + 5, 6]], { ob: 1, ext: 1 })); },
+  taper(g) { const x = rint(18, 36), c2 = []; [[58, 50, 5], [50, 42, 4], [42, 34, 3], [34, 26, 2], [26, 8, 1]].forEach(([y0, y1, h], i) => c2.push(ch([[x, y0], [x, y1]], { oa: i === 0, ob: i === 4, ext: i === 4, hw: h }))); return go(g, ...c2); },
+  flareUp(g) { const x = rint(18, 36), c2 = []; [[58, 48, 1], [48, 40, 2], [40, 32, 3], [32, 24, 4], [24, 8, 5]].forEach(([y0, y1, h], i) => c2.push(ch([[x, y0], [x, y1]], { oa: i === 0, ob: i === 4, ext: i === 4, hw: h }))); return go(g, ...c2); },
   mazeSpiral(g) {   // the channel winds inward in a spiral and opens at the centre
     const cx = 27, cy = rint(28, 32), turns = 0.75 + Math.random() * 0.4, r0 = rint(18, 20), r1 = 8, n = 48, pts = [];
     for (let i = 0; i <= n; i++) { const t = i / n, th = t * turns * Math.PI * 2, r = r0 - (r0 - r1) * t, phi = Math.PI - th; pts.push([cx + r * Math.cos(phi), cy - r * Math.sin(phi)]); }
@@ -562,7 +645,7 @@ const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwBase: 56,
   order: [], drops: [], bumpers: [], movers: [], pal: null, pal2: null, pat: 0, assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
-  shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1, suction: true
+  shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1, suction: true, paused: false
 };
 window.__G = G; // handy for debugging
 G.build = n => buildLevel(n); G.update = dt => update(dt); G.launch = () => launch();
@@ -726,7 +809,11 @@ function newGame() {
   G.level = 0; G.score = 0; G.lives = 3; G.pwBase = 56; G.pierce = 0; G.pw = 56;
   G.parts.length = 0; G.texts.length = 0;
   G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
-  const kinds = ['center', 'multi', 'multi', 'multi', 'diagRand', 'diagRand', 'vee', 'flare', 'mazeSpiral', 'mazeSpiral', 'wave', 'wave', 'stubs', 'open', 'bottle', 'chamber', 'mazeH', 'mazeM', 'mazeT', 'mazeD', 'mazeR', 'mazeLadder', 'mazeFish', 'mazePlus', 'mazeFork', 'mazeTree'];
+  const kinds = ['center', 'multi', 'multi', 'diagRand', 'diagRand', 'vee', 'flare', 'mazeSpiral', 'wave', 'stubs', 'open', 'bottle', 'chamber',
+    'mazeH', 'mazeM', 'mazeT', 'mazeD', 'mazeR', 'mazeLadder', 'mazeFish', 'mazePlus', 'mazeFork', 'mazeTree',
+    'zigzag', 'ring', 'trident', 'starHub', 'rake', 'portal', 'fan', 'bridge', 'cage', 'diamondRing', 'tripleDiag', 'beads', 'teeth', 'needle', 'canyon',
+    'sigmoid', 'hook', 'meander', 'randTree', 'randRooms', 'doubleWave', 'tbar', 'gates', 'yy', 'crown', 'arch',
+    'ring2', 'zigzagWide', 'plusRoom', 'steps', 'keyhole', 'fir', 'palm', 'antenna', 'taper', 'flareUp'];
   G.tubes = [];
   for (let i = 0; i < SHAPES.length; i++) {
     let k; do { k = kinds[(Math.random() * kinds.length) | 0]; } while (k === G.tubes[i - 1]);
@@ -1094,6 +1181,11 @@ function draw(now) {
   ctx.restore();
 
   ctx.fillStyle = 'rgba(255,255,255,.28)'; ctx.font = '8px ' + FONT; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic'; ctx.fillText('v' + VERSION, W - 4, H - 2);
+  if (G.paused) {
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 30px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('PAUSE', W / 2, 210);
+    ctx.font = '13px ' + FONT; ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fillText('上の ▶ ボタン（Pキー）で再開', W / 2, 250);
+  }
   // overlays
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   if (G.state === 'ready' && G.hint) {
@@ -1113,7 +1205,8 @@ function draw(now) {
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(1 / 30, (now - last) / 1000); last = now;
-  update(dt); draw(now);
+  if (!G.paused) update(dt);
+  draw(now);
   const over = G.state === 'over' ? 'block' : 'none';
   if (contBtn.style.display !== over) { contBtn.style.display = over; nextBtn.style.display = over; againBtn.style.display = over; }
   // the share button only appears on the game-over screen, a moment after it, so it can't be hit by accident while playing
@@ -1134,6 +1227,7 @@ function pointerX(e) {
 cv.addEventListener('pointermove', e => { G.target = pointerX(e); });
 cv.addEventListener('pointerdown', e => {
   initAudio();
+  if (G.paused) return;
   G.target = pointerX(e);
   if (G.state === 'ready') launch();
   else if (G.state === 'over' && performance.now() - G.overAt > 800) newGame();
@@ -1144,10 +1238,12 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight' || e.key === 'd') G.keys.r = true;
   else if (e.key === ' ' || e.key === 'Enter') {
     initAudio(); e.preventDefault();
+    if (G.paused) return;
     if (G.state === 'ready') launch(); else if (G.state === 'over' && performance.now() - G.overAt > 500) continueGame();
   } else if (e.key === 'm') toggleMute();
   else if (e.key === 'r' && G.state === 'over') newGame();
   else if (e.key === 'f') setSuction(!G.suction);
+  else if (e.key === 'p' || e.key === 'Escape') setPause(!G.paused);
 });
 window.addEventListener('keyup', e => {
   if (e.key === 'ArrowLeft' || e.key === 'a') G.keys.l = false;
@@ -1220,6 +1316,13 @@ shareBtn.addEventListener('click', async () => {
 });
 
 
+function setPause(on) {
+  if (on && G.state === 'over') return;
+  G.paused = on; pauseBtn.textContent = on ? '▶' : '⏸'; pauseBtn.classList.toggle('armed', on);
+  if (on) { G.keys.l = G.keys.r = false; }
+}
+pauseBtn.addEventListener('click', () => { initAudio(); setPause(!G.paused); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && G.state === 'play') setPause(true); });
 function toggleMute() {
   muted = !muted; muteBtn.textContent = muted ? '🔇' : '🔊';
   try { localStorage.setItem('sb-muted', muted ? '1' : '0'); } catch (e) {}
