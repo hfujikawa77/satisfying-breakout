@@ -50,7 +50,7 @@ canvas{display:block;touch-action:none}
 (() => {
 'use strict';
 // ---------- constants ----------
-const VERSION = '2026-10-21 a';
+const VERSION = '2026-10-22 a';
 const W = 270, H = 500;           // logical size
 const C = 5, COLS = 54, ROWS = 56; // 5px cells
 const OX = 0, OY = 22;             // field origin
@@ -135,6 +135,7 @@ function dropSound() {
   lastDrop = now;
   tone(300, 0.22, 'sine', 0.16, 0.35);
 }
+function bumperSound() { const now = performance.now(); if (now - (bumperSound.t || 0) < 40) return; bumperSound.t = now; tone(520 + Math.random() * 200, 0.12, 'triangle', 0.22, 1.6); }
 function loseSound() { tone(220, 0.35, 'sawtooth', 0.12, 0.3); }
 function clearSound() { [0, 4, 7, 12, 16].forEach((s, i) => setTimeout(() => tone(440 * Math.pow(2, s / 12), 0.25, 'triangle', 0.18), i * 90)); }
 
@@ -372,7 +373,7 @@ function sanitize(g) {
     changed = false;
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
       const i = r * COLS + c;
-      if ((g[i] !== 1 && g[i] !== 3) || broken[i]) continue;
+      if ((g[i] !== 1 && g[i] !== 3 && g[i] !== 4) || broken[i]) continue;
       let touch = false;
       for (let dr = -1; dr <= 1 && !touch; dr++) for (let dc = -1; dc <= 1; dc++) {
         const x = c + dc, y = r + dr;
@@ -382,7 +383,43 @@ function sanitize(g) {
     }
     flood();
   }
-  for (let i = 0; i < g.length; i++) if ((g[i] === 1 || g[i] === 3) && !broken[i]) g[i] = 0;
+  for (let i = 0; i < g.length; i++) if ((g[i] === 1 || g[i] === 3 || g[i] === 4) && !broken[i]) g[i] = 0;
+}
+// stage gimmicks: round bumpers, shuttling bars, and two-hit bricks
+function addGimmicks(g) {
+  G.bumpers = []; G.movers = [];
+  const kind = ['none', 'none', 'bumpers', 'movers', 'both'][rint(0, 4)];
+  const solid = t => t === 1 || t === 3 || t === 4;
+  if (kind === 'bumpers' || kind === 'both') {
+    const want = rint(3, 6);
+    for (let tries = 0; tries < 200 && G.bumpers.length < want; tries++) {
+      const x = rint(30, W - 30), y = rint(OY + 8 * C, OY + 40 * C), r = 6.5;
+      if (G.cavs.some(([cx, cy]) => Math.hypot(cx * C - x, OY + cy * C - y) < 26)) continue;
+      if (G.bumpers.some(b => Math.hypot(b.x - x, b.y - y) < 30)) continue;
+      let ok = true;
+      for (let rr = Math.floor((y - r - 3 - OY) / C); rr <= Math.floor((y + r + 3 - OY) / C) && ok; rr++) for (let cc = Math.floor((x - r - 3) / C); cc <= Math.floor((x + r + 3) / C); cc++) {
+        if (g[rr * COLS + cc] === 2 && Math.hypot((cc + 0.5) * C - x, OY + (rr + 0.5) * C - y) < r + 4) { ok = false; break; }
+      }
+      if (!ok) continue;
+      for (let rr = Math.floor((y - r - 3 - OY) / C); rr <= Math.floor((y + r + 3 - OY) / C); rr++) for (let cc = Math.floor((x - r - 3) / C); cc <= Math.floor((x + r + 3) / C); cc++) {
+        if (solid(g[rr * COLS + cc]) && Math.hypot((cc + 0.5) * C - x, OY + (rr + 0.5) * C - y) < r + 3) g[rr * COLS + cc] = 0;
+      }
+      G.bumpers.push({ x, y, r, flash: 0 });
+    }
+  }
+  if (kind === 'movers' || kind === 'both') {
+    const rows = [];
+    for (let k = rint(1, 3), tries = 0; tries < 60 && rows.length < k; tries++) { const r0 = rint(10, 38); if (rows.every(q => Math.abs(q - r0) > 8)) rows.push(r0); }
+    for (const r0 of rows) {
+      for (let r = r0; r < r0 + 3; r++) for (let c = 2; c < COLS - 2; c++) if (solid(g[r * COLS + c])) g[r * COLS + c] = 0;
+      G.movers.push({ x: rint(30, W - 30), y: OY + (r0 + 1.5) * C, w: rint(28, 48), h: 5, vx: (Math.random() < 0.5 ? -1 : 1) * rint(35, 70) });
+    }
+  }
+  const toughP = [0, 0, 0.12, 0.25][rint(0, 3)];
+  if (toughP) {
+    const p1 = Math.random() * 6.3, p2 = Math.random() * 6.3, thr = 1 - 2 * toughP;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (g[r * COLS + c] === 1 && Math.sin(c * 0.45 + p1) * Math.sin(r * 0.4 + p2) > thr) g[r * COLS + c] = 4;
+  }
 }
 function addObstacles(g) {
   const kind = ['none', 'none', 'shelves', 'pillars', 'diag', 'frame', 'columns'][rint(0, 6)];
@@ -502,7 +539,7 @@ const MAZES = {
 const G = {
   state: 'ready', level: 0, score: 0, lives: 3, best: 0,
   bricks: 0, px: W / 2, target: W / 2, pw: 56, pwBase: 56,
-  order: [], drops: [], pal: null, pal2: null, pat: 0, assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
+  order: [], drops: [], bumpers: [], movers: [], pal: null, pal2: null, pat: 0, assist: [], tubes: ['center'], aim: [W / 2], cavs: [[27, 39]], balls: [], orbs: [], parts: [], texts: [], grid: new Uint8Array(COLS * ROWS),
   shake: 0, fail: 0, pierce: 0, bump: 0, timer: 0, speed: 250, keys: { l: false, r: false }, hint: 1, suction: true
 };
 window.__G = G; // handy for debugging
@@ -526,6 +563,10 @@ function drawCell(c, r, t) {
     const pl = alt ? G.pal2 : G.pal;
     fctx.fillStyle = pl.edge; fctx.fillRect(fx, fy, C, C);
     fctx.fillStyle = pl.fill; fctx.fillRect(fx, fy, C - 1, C - 1);
+  } else if (t === 4) {   // tough brick: needs two hits
+    fctx.fillStyle = '#34414f'; fctx.fillRect(fx, fy, C, C);
+    fctx.fillStyle = '#8197ad'; fctx.fillRect(fx, fy, C - 1, C - 1);
+    fctx.fillStyle = '#b9c8d8'; fctx.fillRect(fx + 1, fy + 1, 2, 2);
   } else if (t === 3) {
     fctx.fillStyle = '#a07800'; fctx.fillRect(fx, fy, C, C);
     fctx.fillStyle = '#ffd21a'; fctx.fillRect(fx, fy, C - 1, C - 1);
@@ -612,10 +653,11 @@ function buildLevel(n) {
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS / 2; c++) { const i = r * COLS + c, j = r * COLS + (COLS - 1 - c); const t = g[i]; g[i] = g[j]; g[j] = t; }
     G.aim = G.aim.map(x => W - x); G.cavs = G.cavs.map(([cx, cy]) => [COLS - cx, cy]); G.assist = G.assist.map(a => ({ x: W - a.x, ax: -a.ax }));
   }
+  addGimmicks(g);
   G.pal2 = PALETTES[(Math.random() * PALETTES.length) | 0];
   G.pat = [0, 0, 1, 2, 3][(Math.random() * 5) | 0];
   sanitize(g);
-  let b = 0; for (let i = 0; i < g.length; i++) if (g[i] === 1 || g[i] === 3) b++;
+  let b = 0; for (let i = 0; i < g.length; i++) if (g[i] === 1 || g[i] === 3 || g[i] === 4) b++;
   G.bricks = b;
   // orbs
   G.orbs = []; G.drops = [];
@@ -694,8 +736,16 @@ function burst(x, y, color, n, spd) {
     G.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 20, life: 0.4 + Math.random() * 0.5, t: 0, col: color, sz: 1 + Math.random() * 2 });
   }
 }
-function destroyCell(c, r) {
+function destroyCell(c, r, force) {
   const i = r * COLS + c, gold = G.grid[i] === 3;
+  if (G.grid[i] === 4 && !force && !(G.pierce > 0)) {   // first hit only cracks it
+    G.grid[i] = 1;
+    fctx.setTransform(scale, 0, 0, scale, 0, 0); fctx.clearRect(c * C, r * C, C, C); drawCell(c, r, 1);
+    burst(OX + (c + 0.5) * C, OY + (r + 0.5) * C, '#b9c8d8', 5, 60);
+    tone(300 + Math.random() * 60, 0.05, 'square', 0.1);
+    return;
+  }
+  if (G.grid[i] === 4) G.grid[i] = 1;
   if (G.grid[i] !== 1 && !gold) return;
   G.grid[i] = 0;
   fctx.setTransform(scale, 0, 0, scale, 0, 0);
@@ -738,7 +788,7 @@ function explode(x, y, rad) {
   const r0 = Math.floor((y - rad - OY) / C), r1 = Math.floor((y + rad - OY) / C);
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
     if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
-    if (Math.hypot(OX + (c + 0.5) * C - x, OY + (r + 0.5) * C - y) < rad) destroyCell(c, r);
+    if (Math.hypot(OX + (c + 0.5) * C - x, OY + (r + 0.5) * C - y) < rad) destroyCell(c, r, true);
   }
   G.shake = 4; burst(x, y, '#ffd060', 40, 160);
   tone(90, 0.4, 'sawtooth', 0.1, 0.3);
@@ -802,11 +852,11 @@ function collideGrid(b) {
     }
     if (best < 0) return;
     if (best === 2) wallSound();
-    if ((best === 1 || best === 3) && G.pierce > 0) { destroyCell(bc, br); continue; }
+    if ((best === 1 || best === 3 || best === 4) && G.pierce > 0) { destroyCell(bc, br, true); continue; }
     const dot = b.vx * bnx + b.vy * bny;
     if (dot < 0) { b.vx -= 2 * dot * bnx; b.vy -= 2 * dot * bny; }
     b.x += bnx * (R - bdist + 0.01); b.y += bny * (R - bdist + 0.01);
-    if (best === 1 || best === 3) destroyCell(bc, br);
+    if (best === 1 || best === 3 || best === 4) destroyCell(bc, br);
     // keep speed constant and avoid endless flat trajectories
     let m = Math.hypot(b.vx, b.vy) || 1;
     // tiny random deflection so perfectly symmetric bounces never loop forever
@@ -820,6 +870,13 @@ function collideGrid(b) {
       b.vx = (b.vx < 0 ? -1 : 1) * s;
     }
   }
+}
+// keep speed constant after a bounce off a bumper / moving bar, and avoid dead-flat paths
+function settleBall(b) {
+  const m = Math.hypot(b.vx, b.vy) || 1;
+  b.vx = b.vx / m * G.speed; b.vy = b.vy / m * G.speed;
+  const minV = G.speed * 0.18;
+  if (Math.abs(b.vy) < minV) { b.vy = (b.vy < 0 ? -1 : 1) * minV; b.vx = (b.vx < 0 ? -1 : 1) * Math.sqrt(G.speed * G.speed - minV * minV); }
 }
 // gentle funnel: balls rising toward a channel get sucked onto its axis (toggle with the 🧲 button / F)
 function funnel(b, dt) {
@@ -844,6 +901,25 @@ function stepBall(b, dt) {
     if (b.y < FIELD_BOTTOM + R + 1) collideGrid(b);
     if (b.x < R) { b.x = R; b.vx = Math.abs(b.vx); wallSound(); }
     else if (b.x > W - R) { b.x = W - R; b.vx = -Math.abs(b.vx); wallSound(); }
+    if (b.y < FIELD_BOTTOM) {
+      for (const bp of G.bumpers) {
+        const dx = b.x - bp.x, dy = b.y - bp.y, d = Math.hypot(dx, dy), rr = bp.r + R;
+        if (d < rr && d > 0) {
+          const nx = dx / d, ny = dy / d, dot = b.vx * nx + b.vy * ny;
+          if (dot < 0) { b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny; }
+          b.x = bp.x + nx * rr; b.y = bp.y + ny * rr; bp.flash = 1; bumperSound(); settleBall(b);
+        }
+      }
+      for (const m of G.movers) {
+        const qx = Math.max(m.x - m.w / 2, Math.min(b.x, m.x + m.w / 2)), qy = Math.max(m.y - m.h / 2, Math.min(b.y, m.y + m.h / 2));
+        const dx = b.x - qx, dy = b.y - qy, d2 = dx * dx + dy * dy;
+        if (d2 < R * R) {
+          const d = Math.sqrt(d2), nx = d > 1e-6 ? dx / d : 0, ny = d > 1e-6 ? dy / d : (b.vy > 0 ? -1 : 1), dot = b.vx * nx + b.vy * ny;
+          if (dot < 0) { b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny; }
+          b.x = qx + nx * (R + 0.1); b.y = qy + ny * (R + 0.1); wallSound(); settleBall(b);
+        }
+      }
+    }
     // paddle
     const half = G.pw / 2, top = PADDLE_Y - PH / 2;
     if (b.vy > 0 && b.y + R >= top && b.y - R <= PADDLE_Y + PH / 2 && Math.abs(b.x - G.px) <= half + R) {
@@ -865,6 +941,8 @@ function update(dt) {
   const wantW = G.pwBase;
   G.pw += (wantW - G.pw) * (1 - Math.exp(-dt * 12));
   G.bump = Math.max(0, G.bump - dt * 8);
+  for (const m of G.movers) { m.x += m.vx * dt; if (m.x - m.w / 2 < 8) { m.x = 8 + m.w / 2; m.vx = Math.abs(m.vx); } else if (m.x + m.w / 2 > W - 8) { m.x = W - 8 - m.w / 2; m.vx = -Math.abs(m.vx); } }
+  for (const bp of G.bumpers) bp.flash = Math.max(0, bp.flash - dt * 5);
   if (G.pierce > 0) G.pierce = Math.max(0, G.pierce - dt);
   G.shake = Math.max(0, G.shake - dt * 8);
 
@@ -955,6 +1033,12 @@ function draw(now) {
     ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1; ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.font = 'bold 9px ' + FONT; ctx.fillText(d.txt, o.x, o.y + 0.5);
   }
+  // bumpers and shuttling bars
+  for (const bp of G.bumpers) {
+    ctx.fillStyle = '#f2f2f2'; ctx.beginPath(); ctx.arc(bp.x, bp.y, bp.r + bp.flash * 1.5, 0, 6.283); ctx.fill();
+    ctx.fillStyle = bp.flash > 0.3 ? '#ffd21a' : G.pal.fill; ctx.beginPath(); ctx.arc(bp.x, bp.y, bp.r * 0.55, 0, 6.283); ctx.fill();
+  }
+  for (const m of G.movers) { ctx.fillStyle = '#d9d9d9'; rrect(m.x - m.w / 2, m.y - m.h / 2, m.w, m.h, 2.5); ctx.fill(); }
   // falling items
   for (const d of G.drops) {
     const c = ORB[d.type];
