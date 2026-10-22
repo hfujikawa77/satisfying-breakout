@@ -52,7 +52,7 @@ canvas{display:block;touch-action:none}
 (() => {
 'use strict';
 // ---------- constants ----------
-const VERSION = '2026-10-22 b';
+const VERSION = '2026-10-22 c';
 const W = 270, H = 500;           // logical size
 const C = 5, COLS = 54, ROWS = 56; // 5px cells
 const OX = 0, OY = 22;             // field origin
@@ -422,9 +422,10 @@ function addGimmicks(g) {
       const x = rint(30, W - 30), y = rint(OY + 8 * C, OY + 40 * C), r = 6.5;
       if (G.cavs.some(([cx, cy]) => Math.hypot(cx * C - x, OY + cy * C - y) < 26)) continue;
       if (G.bumpers.some(b => Math.hypot(b.x - x, b.y - y) < 30)) continue;
-      let ok = true;
-      for (let rr = Math.floor((y - r - 3 - OY) / C); rr <= Math.floor((y + r + 3 - OY) / C) && ok; rr++) for (let cc = Math.floor((x - r - 3) / C); cc <= Math.floor((x + r + 3) / C); cc++) {
-        if (g[rr * COLS + cc] === 2 && Math.hypot((cc + 0.5) * C - x, OY + (rr + 0.5) * C - y) < r + 4) { ok = false; break; }
+      let ok = true;   // keep well away from every wall, so a bumper can never plug a channel
+      for (let rr = Math.floor((y - r - 9 - OY) / C); rr <= Math.floor((y + r + 9 - OY) / C) && ok; rr++) for (let cc = Math.floor((x - r - 9) / C); cc <= Math.floor((x + r + 9) / C); cc++) {
+        if (rr < 0 || cc < 0 || rr >= ROWS || cc >= COLS) continue;
+        if (g[rr * COLS + cc] === 2 && Math.hypot((cc + 0.5) * C - x, OY + (rr + 0.5) * C - y) < r + 8) { ok = false; break; }
       }
       if (!ok) continue;
       for (let rr = Math.floor((y - r - 3 - OY) / C); rr <= Math.floor((y + r + 3 - OY) / C); rr++) for (let cc = Math.floor((x - r - 3) / C); cc <= Math.floor((x + r + 3) / C); cc++) {
@@ -435,7 +436,11 @@ function addGimmicks(g) {
   }
   if (kind === 'movers' || kind === 'both') {
     const rows = [];
-    for (let k = rint(1, 3), tries = 0; tries < 60 && rows.length < k; tries++) { const r0 = rint(10, 38); if (rows.every(q => Math.abs(q - r0) > 8)) rows.push(r0); }
+    for (let k = rint(1, 3), tries = 0; tries < 80 && rows.length < k; tries++) {
+      const r0 = rint(10, 38); let clear = true;   // a bar only runs in rows with no inner walls (so it never crosses a channel)
+      for (let r = r0; r < r0 + 3 && clear; r++) for (let c = 3; c < COLS - 3; c++) if (g[r * COLS + c] === 2) { clear = false; break; }
+      if (clear && rows.every(q => Math.abs(q - r0) > 8)) rows.push(r0);
+    }
     for (const r0 of rows) {
       for (let r = r0; r < r0 + 3; r++) for (let c = 2; c < COLS - 2; c++) if (solid(g[r * COLS + c])) g[r * COLS + c] = 0;
       G.movers.push({ x: rint(30, W - 30), y: OY + (r0 + 1.5) * C, w: rint(28, 48), h: 5, vx: (Math.random() < 0.5 ? -1 : 1) * rint(35, 70) });
