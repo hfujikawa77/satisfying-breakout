@@ -464,6 +464,28 @@ const MAZES = {
     const segs = [{ a: [x0, 58], b: [x0 + dir * dx, top], oa: true, ob: true, hw: 3 }];
     corridor(g, segs); return segs;
   },
+  mazeSpiral(g) {   // the channel winds inward in a spiral and opens at the centre
+    const cx = 27, cy = rint(28, 32), turns = 0.75 + Math.random() * 0.4, r0 = rint(18, 20), r1 = 8, n = 48, pts = [];
+    for (let i = 0; i <= n; i++) { const t = i / n, th = t * turns * Math.PI * 2, r = r0 - (r0 - r1) * t, phi = Math.PI - th; pts.push([cx + r * Math.cos(phi), cy - r * Math.sin(phi)]); }
+    { const [x1, y1] = pts[n], [x0, y0] = pts[n - 1], L = Math.hypot(x1 - x0, y1 - y0); pts.push([x1 + (x1 - x0) / L * 9, y1 + (y1 - y0) / L * 9]); }   // a long straight end so it really opens
+    const segs = [{ a: [pts[0][0], 58], b: pts[0], oa: true, hw: 3 }];
+    for (let i = 0; i < pts.length - 1; i++) segs.push({ a: pts[i], b: pts[i + 1], ob: i === pts.length - 2, hw: 3 });
+    corridor(g, segs);
+    // yellow plugs in the coil walls: break one to reach the brick band between the turns
+    [6, 14, 22, 30, 38].forEach((i, k) => {
+      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i + 1], L = Math.hypot(x1 - x0, y1 - y0), sd = k % 2 ? 1 : -1;
+      plug(g, pts[i][0] - (y1 - y0) / L * 4 * sd, pts[i][1] + (x1 - x0) / L * 4 * sd);
+    });
+    return segs;
+  },
+  wave(g) {   // a sine-wave channel
+    const A = rint(4, 6), per = rint(60, 80), k = Math.PI * 2 / per, cx = rint(A + 10, 44 - A), top = rint(12, 24), pts = [];
+    for (let y = 58; y >= top; y -= 2) pts.push([cx + A * Math.cos(k * (58 - y)), y]);
+    { const [x1, y1] = pts[pts.length - 1], [x0, y0] = pts[pts.length - 2], L = Math.hypot(x1 - x0, y1 - y0); pts.push([x1 + (x1 - x0) / L * 9, y1 + (y1 - y0) / L * 9]); }
+    const segs = [];
+    for (let i = 0; i < pts.length - 1; i++) segs.push({ a: pts[i], b: pts[i + 1], oa: i === 0, ob: i === pts.length - 2, hw: 3 });
+    corridor(g, segs); return segs;
+  },
   stubs(g) {   // a row of short holes in the floor
     const k = rint(3, 5), gap = Math.floor(40 / k), x0 = rint(8, 12), segs = [];
     for (let i = 0; i < k; i++) segs.push({ a: [x0 + i * gap + rint(0, 2), 58], b: [x0 + i * gap + 2, rint(46, 50)], oa: true, ob: true });
@@ -704,7 +726,7 @@ function newGame() {
   G.level = 0; G.score = 0; G.lives = 3; G.pwBase = 56; G.pierce = 0; G.pw = 56;
   G.parts.length = 0; G.texts.length = 0;
   G.order = SHAPES.map((_, i) => i).sort(() => Math.random() - 0.5);
-  const kinds = ['center', 'multi', 'multi', 'multi', 'diagRand', 'diagRand', 'vee', 'flare', 'stubs', 'open', 'bottle', 'chamber', 'mazeH', 'mazeM', 'mazeT', 'mazeD', 'mazeR', 'mazeLadder', 'mazeFish', 'mazePlus', 'mazeFork', 'mazeTree'];
+  const kinds = ['center', 'multi', 'multi', 'multi', 'diagRand', 'diagRand', 'vee', 'flare', 'mazeSpiral', 'mazeSpiral', 'wave', 'wave', 'stubs', 'open', 'bottle', 'chamber', 'mazeH', 'mazeM', 'mazeT', 'mazeD', 'mazeR', 'mazeLadder', 'mazeFish', 'mazePlus', 'mazeFork', 'mazeTree'];
   G.tubes = [];
   for (let i = 0; i < SHAPES.length; i++) {
     let k; do { k = kinds[(Math.random() * kinds.length) | 0]; } while (k === G.tubes[i - 1]);
